@@ -22,6 +22,7 @@ out/
 *.env
 !*.env.example
 shared.env
+.env.production
 
 # Logs
 logs/
