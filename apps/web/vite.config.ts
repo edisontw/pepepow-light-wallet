@@ -4,6 +4,7 @@ import wasm from "vite-plugin-wasm";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 export default defineConfig({
+  base: "/wallet/",
   plugins: [react(), wasm(), nodePolyfills()],
   define: { global: "globalThis" },
   server: { port: 5173 },

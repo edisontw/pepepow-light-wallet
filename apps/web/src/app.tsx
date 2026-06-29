@@ -10,7 +10,7 @@ import Claim from "./pages/Claim";
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/wallet">
       <Routes>
         <Route path="/" element={<WalletHome />} />
         <Route path="/send" element={<Send />} />
