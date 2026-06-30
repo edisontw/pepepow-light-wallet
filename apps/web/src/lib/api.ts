@@ -102,7 +102,7 @@ export async function apiFetch(path: string, options: RequestInit & { signal?: A
   const url = getApiUrl(path);
   if (debug) {
     const kid = token ? token.split('.')[1]?.slice(0, 10) : 'none';
-    console.info(`[api] fetch: ${path}, token_kid=${kid}`, options);
+    console.info(`[api] fetch: ${path}, method=${options.method || "GET"}, has_body=${options.body ? "yes" : "no"}, token_kid=${kid}`);
   }
   const res = await fetch(url, { ...options, headers });
   if (debug) {
@@ -168,16 +168,16 @@ export async function createPaymentRequest(data: {
   return res.json();
 }
 
+export async function getPaymentRequest(id: string) {
+  const res = await apiFetch(API_ENDPOINTS.v1.request(id));
+  return res.json();
+}
+
 export async function claimPaymentRequest(id: string, address: string) {
   const res = await apiFetch(API_ENDPOINTS.v1.requestClaim(id), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ address }),
   });
-  return res.json();
-}
-
-export async function getPaymentRequest(id: string) {
-  const res = await apiFetch(API_ENDPOINTS.v1.request(id));
   return res.json();
 }
