@@ -12,6 +12,9 @@ type NavItem = {
   short: string;
 };
 
+const assetBase = import.meta.env.BASE_URL || "/";
+const logoUrl = `${assetBase}brand/logo.png`;
+
 export default function Header({ compact }: HeaderProps) {
   const { t, i18n } = useTranslation();
   const location = useLocation();
@@ -38,7 +41,7 @@ export default function Header({ compact }: HeaderProps) {
     <header className={`app-header${compact ? " compact" : ""}`}>
       <div className="app-header-inner">
         <Link to="/" className="brand" aria-label={t("title")}>
-          <img src="/brand/logo.png" alt="PEPEPOW" className="brand-logo" />
+          <img src={logoUrl} alt="PEPEPOW" className="brand-logo" loading="eager" decoding="async" />
           <span className="brand-text">
             <span className="brand-name">PEPEPOW</span>
             <span className="brand-sub">{t("header.wallet")}</span>
