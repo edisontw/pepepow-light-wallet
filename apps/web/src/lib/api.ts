@@ -1,7 +1,14 @@
 const AUTH_TOKEN_KEY = "pepew_api_token";
 
-export const API_BASE =
-  import.meta.env.VITE_API_BASE ?? "";
+function normalizeApiBase(value?: string) {
+  const base = (value || "").trim().replace(/\/+$/, "");
+  // Production wallet must use same-origin PEPEW Light / ElectrumX Gateway.
+  // Ignore the old hosted wallet API even if it is still present in build env.
+  if (/^https?:\/\/api\.pepepow\.net$/i.test(base)) return "";
+  return base;
+}
+
+export const API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE);
 export const EXPLORER_BASE_URL = "https://explorer.pepepow.net";
 
 export const API_ENDPOINTS = {
