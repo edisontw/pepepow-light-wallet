@@ -80,6 +80,18 @@ Unconfirmed: <amount> PEPEW
 9. Enter an invalid PEPEW address and confirm the error is user-facing, not a raw internal code.
 10. In DevTools Network and Console, search for the forbidden terms above.
 
+## Post-deploy browser checklist
+
+Use DevTools after a production build has been deployed:
+
+- Network tab: clear entries, then reload `/wallet/`.
+- Import mnemonic.
+- Confirm balance and history.
+- Filter Network requests for `mnemonic`, `seed`, `private`, `xprv`.
+- Confirm Light API calls only include addresses or txids.
+- Confirm Console does not print request bodies, wallet objects, mnemonic, private key, or xprv.
+- With `?debug=1`, Console may show API path, method, `has_body`, and token key hint only. It must not print request body content.
+
 ## Server log scan commands
 
 ```bash
