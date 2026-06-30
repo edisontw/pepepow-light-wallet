@@ -8,6 +8,19 @@ export default defineConfig({
   plugins: [react(), wasm(), nodePolyfills()],
   define: { global: "globalThis" },
   server: { port: 5173 },
-  build: { outDir: 'dist', target: "esnext" },
+  build: {
+    outDir: 'dist',
+    target: "esnext",
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom", "react-router-dom"],
+          i18n: ["i18next", "react-i18next"],
+          qrcode: ["qrcode"]
+        }
+      }
+    }
+  },
   resolve: { preserveSymlinks: true }
 })
