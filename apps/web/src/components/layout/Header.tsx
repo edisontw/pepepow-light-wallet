@@ -26,7 +26,6 @@ export default function Header({ compact }: HeaderProps) {
 
   const navItems: NavItem[] = [
     { to: "/", label: t("nav.home"), short: t("nav.homeShort") },
-    { to: "/send", label: t("nav.send"), short: t("nav.sendShort") },
     { to: "/history", label: t("nav.history"), short: t("nav.historyShort") },
   ];
 
@@ -78,7 +77,7 @@ export default function Header({ compact }: HeaderProps) {
             }}
             aria-label={t("header.toggleTheme")}
           >
-            🌓
+            Theme
           </button>
           <button className="btn secondary small" onClick={() => i18n.changeLanguage(nextLang)}>
             {langLabel}
