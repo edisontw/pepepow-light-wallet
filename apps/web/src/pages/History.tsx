@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Buffer } from "buffer";
-import { deriveFromMnemonic, PEPEPOW, pubkeyToP2PKH } from "@pepepow/wallet-core";
-import { apiFetch, API_ENDPOINTS, EXPLORER_BASE_URL } from "../lib/api";
+import { EXPLORER_BASE_URL } from "../lib/api";
 import { pepewLightClient } from "../lib/pepewLightClient";
 import AppLayout from "../components/layout/AppLayout";
-
 import PageCard from "../components/layout/PageCard";
 
-const INITIAL_HISTORY_LIMIT = 1;
-const SHOW_MORE_HISTORY_LIMIT = 5;
+const INITIAL_HISTORY_LIMIT = 5;
+const SHOW_MORE_HISTORY_LIMIT = 25;
 const HISTORY_FETCH_THROTTLE_MS = 15000;
 
 type FetchHealth = {
@@ -44,10 +41,12 @@ type TxSummaryViewModel = {
   key: string;
   txid: string;
   timeLabel: string;
+  statusLabel: string;
+  heightLabel: string;
 };
 
 function parseHistoryPayload(payload: any) {
-  if (Array.isArray(payload)) return { txs: payload };
+  if (Array.isArray(payload)) return { txs: payload, source: "PEPEW Light API" };
   if (payload && typeof payload === "object") {
     let txs = Array.isArray(payload.txs)
       ? payload.txs
@@ -63,14 +62,13 @@ function parseHistoryPayload(payload: any) {
         time: tx.time || tx.blocktime || null,
       }));
     }
-    return { ...payload, txs };
+    return { ...payload, txs, source: payload.source || "PEPEW Light API" };
   }
-  return { txs: [] };
+  return { txs: [], source: "PEPEW Light API" };
 }
 
-
-function createHistoryKey(addresses: string[], limit: number) {
-  return `${limit}:${addresses.join("|")}`;
+function createHistoryKey(address: string, limit: number) {
+  return `${limit}:${address}`;
 }
 
 function parseTxTimestampMs(tx: any): number | null {
@@ -111,10 +109,21 @@ function shortTxid(txid: string): string {
   return `${value.slice(0, 10)}…${value.slice(-6)}`;
 }
 
+function formatHeightLabel(tx: any): string {
+  const height = Number(tx?.height ?? 0);
+  if (!Number.isFinite(height) || height <= 0) return "mempool";
+  return String(height);
+}
+
+function formatStatusLabel(tx: any): string {
+  const height = Number(tx?.height ?? 0);
+  if (!Number.isFinite(height) || height <= 0) return "Unconfirmed";
+  return "Confirmed";
+}
+
 export default function History() {
   const { t } = useTranslation();
   const [currentAddress] = useState(localStorage.getItem("pepew_address") || "");
-  const [mnemonic] = useState(localStorage.getItem("pepew_mnemonic") || "");
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -124,42 +133,12 @@ export default function History() {
   const [health, setHealth] = useState<FetchHealth>({ status: "idle", statusCode: null, latencyMs: null });
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
 
-  const historyAbortRef = useRef<AbortController | null>(null);
   const historyCacheRef = useRef<Map<string, CachedHistory>>(new Map());
   const historyInflightRef = useRef<Map<string, Promise<HistoryFetchResult>>>(new Map());
-  const addressesRef = useRef<string[] | null>(null);
   const forceNextFetchRef = useRef(false);
 
-  const resolveAddresses = async () => {
-    if (addressesRef.current) return addressesRef.current;
-
-    const addresses: string[] = [];
-    if (mnemonic) {
-      try {
-        for (let i = 0; i < 20; i++) {
-          const node = await deriveFromMnemonic(mnemonic, `m/44'/5'/0'/0/${i}`);
-          addresses.push(pubkeyToP2PKH(Buffer.from(node.publicKey!), PEPEPOW));
-        }
-        for (let i = 0; i < 20; i++) {
-          const node = await deriveFromMnemonic(mnemonic, `m/44'/5'/0'/1/${i}`);
-          addresses.push(pubkeyToP2PKH(Buffer.from(node.publicKey!), PEPEPOW));
-        }
-      } catch (deriveError) {
-        console.error("[history] Derivation failed", deriveError);
-      }
-    }
-
-    if (currentAddress && !addresses.includes(currentAddress)) {
-      addresses.push(currentAddress);
-    }
-
-    const unique = Array.from(new Set(addresses));
-    addressesRef.current = unique;
-    return unique;
-  };
-
-  const fetchHistory = async (addresses: string[], limit: number, force = false): Promise<HistoryFetchResult> => {
-    const key = createHistoryKey(addresses, limit);
+  const fetchHistory = async (address: string, limit: number, force = false): Promise<HistoryFetchResult> => {
+    const key = createHistoryKey(address, limit);
     const now = Date.now();
 
     const inFlight = historyInflightRef.current.get(key);
@@ -170,62 +149,18 @@ export default function History() {
       return cached.result;
     }
 
-    historyAbortRef.current?.abort();
-    const controller = new AbortController();
-    historyAbortRef.current = controller;
-
     const promise = (async (): Promise<HistoryFetchResult> => {
       const startedAt = Date.now();
       try {
-        const useLightApi = typeof import.meta !== "undefined" && (import.meta as any).env && (import.meta as any).env.VITE_PEPEW_LIGHT_API_BASE_URL;
-        if (useLightApi && currentAddress) {
-          const payload = await pepewLightClient.getHistory(currentAddress);
-          const latencyMs = Date.now() - startedAt;
-          return {
-            ok: true,
-            status: 200,
-            latencyMs,
-            payload: parseHistoryPayload(payload),
-          };
-        }
-
-        const r = await apiFetch(API_ENDPOINTS.v1.history, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ addresses, limit }),
-
-          signal: controller.signal,
-        });
-
-        const text = await r.text().catch(() => "");
+        const payload = await pepewLightClient.getHistory(address);
         const latencyMs = Date.now() - startedAt;
-        let json: any = {};
-        if (text) {
-          try {
-            json = JSON.parse(text);
-          } catch {
-            json = {};
-          }
-        }
-
-        if (!r.ok) {
-          const detail = json?.error || json?.message || `HTTP ${r.status}`;
-          return {
-            ok: false,
-            status: r.status,
-            latencyMs,
-            error: detail,
-          };
-        }
-
         return {
           ok: true,
-          status: r.status,
+          status: 200,
           latencyMs,
-          payload: parseHistoryPayload(json),
+          payload: parseHistoryPayload(payload),
         };
       } catch (e: any) {
-        if (e?.name === "AbortError") throw e;
         return {
           ok: false,
           status: null,
@@ -258,15 +193,7 @@ export default function History() {
       forceNextFetchRef.current = false;
 
       try {
-        const addresses = await resolveAddresses();
-        if (!active) return;
-        if (!addresses.length) {
-          setErr(t("history.emptyAddress"));
-          setLoading(false);
-          return;
-        }
-
-        const result = await fetchHistory(addresses, historyLimit, force);
+        const result = await fetchHistory(currentAddress, historyLimit, force);
         if (!active) return;
 
         if (!result.ok) {
@@ -279,8 +206,8 @@ export default function History() {
         setHealth({ status: "ok", statusCode: result.status, latencyMs: result.latencyMs });
         setLastUpdatedAt(Date.now());
       } catch (e: any) {
-        if (!active || e?.name === "AbortError") return;
-        setErr(t("errors.apiUnreachable"));
+        if (!active) return;
+        setErr(e?.message || t("errors.apiUnreachable"));
         setHealth((prev) => ({ ...prev, status: "fail" }));
       } finally {
         if (active) setLoading(false);
@@ -291,7 +218,7 @@ export default function History() {
     return () => {
       active = false;
     };
-  }, [currentAddress, historyLimit, mnemonic, reloadKey, t]);
+  }, [currentAddress, historyLimit, reloadKey, t]);
 
   const txs = useMemo(() => {
     const all = Array.isArray(data?.txs) ? data.txs : [];
@@ -305,6 +232,8 @@ export default function History() {
         key: txid || `tx-${idx}`,
         txid,
         timeLabel: formatTimeLabel(tx),
+        statusLabel: formatStatusLabel(tx),
+        heightLabel: formatHeightLabel(tx),
       };
     });
   }, [txs]);
@@ -358,7 +287,12 @@ export default function History() {
         ) : data ? (
           <div className="card">
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-              <div className="section-title">{t("history.title")}</div>
+              <div>
+                <div className="section-title">{t("history.title")}</div>
+                <div className="muted" style={{ fontSize: "0.85rem", marginTop: 2 }}>
+                  Source: PEPEW Light API / ElectrumX Gateway
+                </div>
+              </div>
               <button className="btn secondary" onClick={handleRefresh}>{t("history.refresh")}</button>
             </div>
 
@@ -378,6 +312,12 @@ export default function History() {
                     return (
                       <div key={tx.key} className="tx-row">
                         <div className="tx-info">
+                          <div className="tx-line">
+                            <span className="muted">Status: </span>
+                            <span>{tx.statusLabel}</span>
+                            <span className="muted" style={{ marginLeft: 8 }}>Height: </span>
+                            <span>{tx.heightLabel}</span>
+                          </div>
                           <div className="tx-line">
                             <span className="muted">{t("history.timeLabel")}: </span>
                             <span>{tx.timeLabel}</span>
@@ -409,7 +349,7 @@ export default function History() {
                   })}
                 </div>
 
-                {historyLimit === INITIAL_HISTORY_LIMIT && txs.length > 0 && (
+                {historyLimit === INITIAL_HISTORY_LIMIT && (Array.isArray(data?.txs) ? data.txs.length : 0) > INITIAL_HISTORY_LIMIT && (
                   <div className="row" style={{ marginTop: 10 }}>
                     <button className="btn secondary" onClick={handleShowMore}>
                       {t("history.showMore")}
