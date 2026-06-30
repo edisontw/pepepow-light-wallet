@@ -92,7 +92,7 @@ async function runTests() {
         await client.getAddress("PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb");
       },
       (err: any) => {
-        return err.name === "AbortError";
+        return err.message.includes("Balance lookup timed out");
       }
     );
 
@@ -107,7 +107,7 @@ async function runTests() {
         status: 400,
         json: async () => ({
           error: {
-            message: "Invalid PEPEPOW address.",
+            message: "unsupported_address_prefix",
           },
         }),
       } as any;
@@ -119,11 +119,34 @@ async function runTests() {
         await client.getAddress("invalid");
       },
       (err: any) => {
-        return err.message.includes("Invalid PEPEPOW address");
+        return err.message.includes("Invalid PEPEW address");
       }
     );
 
     console.log("  - Invalid response error reporting: PASSED");
+  }
+
+  // Test Case 4: Rate limit mapping
+  {
+    globalThis.fetch = async () => {
+      return {
+        ok: false,
+        status: 429,
+        json: async () => ({ detail: "rate limit exceeded" }),
+      } as any;
+    };
+
+    const client = new PepewLightApiClient("http://localhost:8088");
+    await assert.rejects(
+      async () => {
+        await client.getHistory("PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb");
+      },
+      (err: any) => {
+        return err.message.includes("Too many requests");
+      }
+    );
+
+    console.log("  - Rate limit error reporting: PASSED");
   }
 
   // Restore fetch
