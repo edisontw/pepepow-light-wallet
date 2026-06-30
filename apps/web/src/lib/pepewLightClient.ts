@@ -1,5 +1,10 @@
 const DEFAULT_TIMEOUT_MS = 8000;
 
+const ADDRESS_ERROR_MESSAGE = "Invalid PEPEW address. Please check the address format and try again.";
+const API_UNAVAILABLE_MESSAGE = "PEPEW Light API is temporarily unavailable. Please try again later.";
+const RATE_LIMIT_MESSAGE = "Too many requests. Please wait a moment and try again.";
+const TIMEOUT_MESSAGE = "Balance lookup timed out. Please try again.";
+
 export interface LightAddressBalance {
   confirmed: number;
   unconfirmed: number;
@@ -30,6 +35,44 @@ export interface LightTxResponse {
   read_only: boolean;
 }
 
+function getRawErrorMessage(errJson: any) {
+  const error = errJson?.error;
+  if (typeof error === "string") return error;
+  if (typeof error?.message === "string") return error.message;
+  if (typeof error?.code === "string") return error.code;
+  if (typeof errJson?.detail === "string") return errJson.detail;
+  if (typeof errJson?.message === "string") return errJson.message;
+  return "";
+}
+
+function mapLightApiError(raw: string, status?: number) {
+  const text = raw.toLowerCase();
+  if (
+    text.includes("unsupported_address_prefix") ||
+    text.includes("invalid_address") ||
+    text.includes("bad_checksum") ||
+    text.includes("address_too_short") ||
+    text.includes("address_too_long") ||
+    text.includes("invalid pepepow address") ||
+    text.includes("invalid pepew address")
+  ) {
+    return ADDRESS_ERROR_MESSAGE;
+  }
+  if (status === 429 || text.includes("too many requests") || text.includes("rate limit")) {
+    return RATE_LIMIT_MESSAGE;
+  }
+  if (text.includes("timeout") || text.includes("timed out") || text.includes("abort")) {
+    return TIMEOUT_MESSAGE;
+  }
+  if (status && status >= 500) {
+    return API_UNAVAILABLE_MESSAGE;
+  }
+  if (text.includes("network") || text.includes("failed to fetch") || text.includes("temporarily unavailable")) {
+    return API_UNAVAILABLE_MESSAGE;
+  }
+  return raw || API_UNAVAILABLE_MESSAGE;
+}
+
 export class PepewLightApiClient {
   private baseUrl: string;
   private timeoutMs: number;
@@ -56,10 +99,24 @@ export class PepewLightApiClient {
       });
       clearTimeout(timer);
       return res;
-    } catch (err) {
+    } catch (err: any) {
       clearTimeout(timer);
-      throw err;
+      if (err?.name === "AbortError") {
+        throw new Error(TIMEOUT_MESSAGE);
+      }
+      throw new Error(mapLightApiError(err?.message || "network error"));
     }
+  }
+
+  private async readError(res: Response) {
+    let detail = "";
+    try {
+      const errJson = await res.json();
+      detail = getRawErrorMessage(errJson);
+    } catch {
+      // ignore
+    }
+    return mapLightApiError(detail || `HTTP ${res.status}`, res.status);
   }
 
   async getAddress(address: string): Promise<LightAddressResponse> {
@@ -68,14 +125,7 @@ export class PepewLightApiClient {
     }
     const res = await this.fetchWithTimeout(`/api/wallet/address/${address}`);
     if (!res.ok) {
-      let detail = "";
-      try {
-        const errJson = await res.json();
-        detail = errJson?.error?.message || errJson?.detail || "";
-      } catch {
-        // ignore
-      }
-      throw new Error(detail || `HTTP error: ${res.status}`);
+      throw new Error(await this.readError(res));
     }
     return res.json();
   }
@@ -86,14 +136,7 @@ export class PepewLightApiClient {
     }
     const res = await this.fetchWithTimeout(`/api/wallet/history/${address}`);
     if (!res.ok) {
-      let detail = "";
-      try {
-        const errJson = await res.json();
-        detail = errJson?.error?.message || errJson?.detail || "";
-      } catch {
-        // ignore
-      }
-      throw new Error(detail || `HTTP error: ${res.status}`);
+      throw new Error(await this.readError(res));
     }
     return res.json();
   }
@@ -104,14 +147,7 @@ export class PepewLightApiClient {
     }
     const res = await this.fetchWithTimeout(`/api/wallet/tx/${txid}`);
     if (!res.ok) {
-      let detail = "";
-      try {
-        const errJson = await res.json();
-        detail = errJson?.error?.message || errJson?.detail || "";
-      } catch {
-        // ignore
-      }
-      throw new Error(detail || `HTTP error: ${res.status}`);
+      throw new Error(await this.readError(res));
     }
     return res.json();
   }
