@@ -1,7 +1,7 @@
 const AUTH_TOKEN_KEY = "pepew_api_token";
 
 export const API_BASE =
-  import.meta.env.VITE_API_BASE ?? "https://api.pepepow.net";
+  import.meta.env.VITE_API_BASE ?? "";
 export const EXPLORER_BASE_URL = "https://explorer.pepepow.net";
 
 export const API_ENDPOINTS = {
