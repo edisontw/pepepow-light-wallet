@@ -78,11 +78,11 @@ export class PepewLightApiClient {
   private timeoutMs: number;
 
   constructor(baseUrl?: string, timeoutMs: number = DEFAULT_TIMEOUT_MS) {
-    // Configured from environment variable, falling back to localhost or a relative/default path
+    // Production default is same-origin PEPEW Light API, e.g. https://light.pepepow.net/api/...
     const viteEnv = typeof import.meta !== "undefined" && (import.meta as any).env
       ? (import.meta as any).env.VITE_PEPEW_LIGHT_API_BASE_URL
       : undefined;
-    this.baseUrl = baseUrl || viteEnv || "http://localhost:8088";
+    this.baseUrl = baseUrl ?? viteEnv ?? "";
     this.timeoutMs = timeoutMs;
   }
 
