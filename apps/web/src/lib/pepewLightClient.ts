@@ -35,6 +35,16 @@ export interface LightTxResponse {
   read_only: boolean;
 }
 
+function normalizeLightApiBase(value?: string) {
+  const base = (value || "").trim().replace(/\/+$/, "");
+  // Production wallet must use same-origin PEPEW Light / ElectrumX Gateway by default.
+  // Ignore old or local development bases if they accidentally remain in build env.
+  if (/^https?:\/\/api\.pepepow\.net$/i.test(base)) return "";
+  if (/^http:\/\/localhost:8088$/i.test(base)) return "";
+  if (/^http:\/\/127\.0\.0\.1:8088$/i.test(base)) return "";
+  return base;
+}
+
 function getRawErrorMessage(errJson: any) {
   const error = errJson?.error;
   if (typeof error === "string") return error;
@@ -82,7 +92,7 @@ export class PepewLightApiClient {
     const viteEnv = typeof import.meta !== "undefined" && (import.meta as any).env
       ? (import.meta as any).env.VITE_PEPEW_LIGHT_API_BASE_URL
       : undefined;
-    this.baseUrl = baseUrl ?? viteEnv ?? "";
+    this.baseUrl = normalizeLightApiBase(baseUrl ?? viteEnv);
     this.timeoutMs = timeoutMs;
   }
 
