@@ -7,6 +7,14 @@ function isWalletPage() {
   return window.location.pathname === WALLET_PATH_PREFIX || window.location.pathname.startsWith(`${WALLET_PATH_PREFIX}/`);
 }
 
+function appendTextLine(parent: HTMLElement, text: string, style?: Partial<CSSStyleDeclaration>) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  if (style) Object.assign(div.style, style);
+  parent.appendChild(div);
+  return div;
+}
+
 function injectSafetyNotice() {
   if (!isWalletPage() || document.getElementById(NOTICE_ID)) return;
   const body = document.querySelector(".page-card-body");
@@ -18,17 +26,21 @@ function injectSafetyNotice() {
   notice.setAttribute("role", "note");
   notice.style.border = "1px solid rgba(255, 170, 0, 0.45)";
   notice.style.marginBottom = "12px";
-  notice.innerHTML = `
-    <div class="section-title">Non-custodial wallet / 非託管網頁錢包</div>
-    <div class="muted" style="margin-top:6px;line-height:1.55">
-      <div>Your mnemonic and private keys stay in your browser.</div>
-      <div>PEPEW Light API only receives addresses for balance and history lookup.</div>
-      <div>Never share or screenshot your mnemonic.</div>
-      <div style="margin-top:6px">助記詞與私鑰只會保存在你的瀏覽器本機。</div>
-      <div>PEPEW Light API 只會接收地址，用於查詢餘額與交易紀錄。</div>
-      <div>請勿分享或截圖助記詞。</div>
-    </div>
-  `;
+
+  appendTextLine(notice, "Non-custodial wallet / 非託管網頁錢包").className = "section-title";
+
+  const content = document.createElement("div");
+  content.className = "muted";
+  content.style.marginTop = "6px";
+  content.style.lineHeight = "1.55";
+  appendTextLine(content, "Your mnemonic and private keys stay in your browser.");
+  appendTextLine(content, "PEPEW Light API only receives addresses for balance and history lookup.");
+  appendTextLine(content, "Never share or screenshot your mnemonic.");
+  appendTextLine(content, "助記詞與私鑰只會保存在你的瀏覽器本機。", { marginTop: "6px" });
+  appendTextLine(content, "PEPEW Light API 只會接收地址，用於查詢餘額與交易紀錄。");
+  appendTextLine(content, "請勿分享或截圖助記詞。");
+  notice.appendChild(content);
+
   body.insertBefore(notice, body.firstChild);
 }
 
@@ -68,12 +80,28 @@ function polishLightBalance() {
     const unconfirmed = unconfirmedMatch?.[1]?.trim();
 
     el.dataset.pepewPolished = "balance";
-    el.innerHTML = `
-      <div style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.04em;opacity:0.82">Confirmed Balance</div>
-      <div style="font-size:1.08rem;font-weight:700;color:inherit">${confirmed}</div>
-      <div style="font-size:0.82rem;margin-top:2px">Source: PEPEW Light API</div>
-      ${unconfirmed && !unconfirmed.startsWith("0") ? `<div style="font-size:0.86rem;margin-top:2px">Unconfirmed: ${unconfirmed} PEPEW</div>` : ""}
-    `;
+    el.replaceChildren();
+    appendTextLine(el, "Confirmed Balance", {
+      fontSize: "0.8rem",
+      textTransform: "uppercase",
+      letterSpacing: "0.04em",
+      opacity: "0.82",
+    });
+    appendTextLine(el, confirmed, {
+      fontSize: "1.08rem",
+      fontWeight: "700",
+      color: "inherit",
+    });
+    appendTextLine(el, "Source: PEPEW Light API", {
+      fontSize: "0.82rem",
+      marginTop: "2px",
+    });
+    if (unconfirmed && !unconfirmed.startsWith("0")) {
+      appendTextLine(el, `Unconfirmed: ${unconfirmed} PEPEW`, {
+        fontSize: "0.86rem",
+        marginTop: "2px",
+      });
+    }
   }
 }
 
