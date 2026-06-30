@@ -3,8 +3,8 @@ const NOTICE_ID = "pepew-wallet-safety-notice";
 
 const ADDRESS_ERROR_MESSAGE = "Invalid PEPEW address. Please check the address format and try again.\nPEPEW 地址格式不正確，請確認後再試。";
 
-function isWalletPage() {
-  return window.location.pathname === WALLET_PATH_PREFIX || window.location.pathname.startsWith(`${WALLET_PATH_PREFIX}/`);
+function isWalletHomePage() {
+  return window.location.pathname === WALLET_PATH_PREFIX || window.location.pathname === `${WALLET_PATH_PREFIX}/`;
 }
 
 function appendTextLine(parent: HTMLElement, text: string, style?: Partial<CSSStyleDeclaration>) {
@@ -16,7 +16,7 @@ function appendTextLine(parent: HTMLElement, text: string, style?: Partial<CSSSt
 }
 
 function injectSafetyNotice() {
-  if (!isWalletPage() || document.getElementById(NOTICE_ID)) return;
+  if (!isWalletHomePage() || document.getElementById(NOTICE_ID)) return;
   const body = document.querySelector(".page-card-body");
   if (!body) return;
 
