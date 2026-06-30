@@ -1,0 +1,122 @@
+# PEPEW Light Wallet Production Smoke Test
+
+Public wallet URL:
+
+```text
+https://light.pepepow.net/wallet/
+```
+
+## Expected checks
+
+- `/wallet/` page loads successfully.
+- Logo displays correctly.
+- Create wallet works.
+- Import mnemonic works.
+- Address displays after wallet creation or mnemonic import.
+- Confirmed balance displays in the wallet home page.
+- History page loads.
+- API errors display as clean user-facing messages.
+
+## Browser DevTools Network checks
+
+Allowed wallet read-only API endpoints:
+
+```text
+GET /api/wallet/address/{address}
+GET /api/wallet/history/{address}
+GET /api/wallet/tx/{txid}
+```
+
+The wallet deployment must not call transaction broadcast endpoints during Phase 4.3.
+
+## Forbidden in Network / Console / logs
+
+The following must not appear in Network payloads, URL query strings, Console output, Nginx logs, or application logs:
+
+```text
+mnemonic
+seed phrase
+seedPhrase
+private key
+privateKey
+xprv
+full wallet object
+```
+
+Expected safe appearances:
+
+- UI safety warning text.
+- Documentation text.
+- Client-side local-only wallet code that does not send secrets to the server.
+
+Unsafe appearances that must be patched immediately:
+
+- API request body or query parameter containing mnemonic, seed phrase, private key, xprv, or full wallet object.
+- Console log containing wallet secrets.
+- Server log containing wallet secrets.
+
+## Manual browser verification
+
+1. Open `https://light.pepepow.net/wallet/`.
+2. Confirm the non-custodial safety notice appears near the top.
+3. Confirm the logo appears.
+4. Create a wallet or import a known test mnemonic.
+5. Confirm the derived address appears.
+6. Confirm the confirmed balance appears as:
+
+```text
+Confirmed Balance
+<amount> PEPEW
+Source: PEPEW Light API
+```
+
+7. If unconfirmed balance exists and is greater than zero, confirm it appears as:
+
+```text
+Unconfirmed: <amount> PEPEW
+```
+
+8. Open the history page and confirm history loads.
+9. Enter an invalid PEPEW address and confirm the error is user-facing, not a raw internal code.
+10. In DevTools Network and Console, search for the forbidden terms above.
+
+## Server log scan commands
+
+```bash
+sudo tail -n 500 /var/log/nginx/pepepow-wallet-access.log 2>/dev/null | grep -Ei "mnemonic|seed phrase|seedPhrase|private key|privateKey|xprv" || true
+journalctl -u pepew-light -n 500 --no-pager 2>/dev/null | grep -Ei "mnemonic|seed phrase|seedPhrase|private key|privateKey|xprv" || true
+```
+
+## Build and deploy commands
+
+```bash
+cd /home/ubuntu/pepepow-light-wallet
+git status --short
+export PATH="/home/ubuntu/node-dist/bin:$PATH"
+npm run build
+sudo rsync -a --delete apps/web/dist/ /var/www/pepepow-light-wallet/
+```
+
+## Public URL verification
+
+```bash
+curl -I https://light.pepepow.net/wallet/
+curl -I https://light.pepepow.net/wallet/brand/logo.png
+curl -i "https://light.pepepow.net/api/wallet/address/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb"
+curl -i "https://light.pepepow.net/api/wallet/history/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb"
+```
+
+## Local secret scan
+
+```bash
+grep -RIn -E "mnemonic|seed phrase|seedPhrase|private key|privateKey|xprv" apps/web/dist apps/web/src docs \
+  --exclude-dir=node_modules \
+  --exclude-dir=.git || true
+```
+
+Classify hits:
+
+- Safe: UI warning text, documentation, local-only code.
+- Unsafe: API payload, URL query, console log, server-bound object.
+
+Patch unsafe hits immediately.
