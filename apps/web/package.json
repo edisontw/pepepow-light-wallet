@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:amount": "rm -rf ./.tmp-tests && tsc --module NodeNext --moduleResolution NodeNext --target ES2020 --outDir ./.tmp-tests ./src/lib/amount.ts && node ./tests/amount.bigint.test.mjs",
-    "test:client": "node --experimental-strip-types ./tests/pepewLightClient.test.ts"
+    "test:client": "node --experimental-strip-types ./tests/pepewLightClient.test.ts",
+    "scan:readonly-api": "node ./tests/readOnlyApiScan.mjs"
   },
 
   "dependencies": {
