@@ -49,6 +49,7 @@ export interface LightTxResponse {
   data: any;
   source: string;
   read_only: boolean;
+  raw?: boolean;
 }
 
 export interface LightBroadcastResponse {
@@ -191,11 +192,11 @@ export class PepewLightApiClient {
     return res.json();
   }
 
-  async getTx(txid: string): Promise<LightTxResponse> {
+  async getTx(txid: string, raw = false): Promise<LightTxResponse> {
     if (!txid) {
       throw new Error("Txid is required");
     }
-    const res = await this.fetchWithTimeout(`/api/wallet/tx/${txid}`);
+    const res = await this.fetchWithTimeout(`/api/wallet/tx/${txid}${raw ? "?raw=1" : ""}`);
     if (!res.ok) {
       throw new Error(await this.readError(res));
     }
