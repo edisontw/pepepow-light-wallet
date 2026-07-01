@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
+import { Buffer } from "buffer";
 import QRCode from "qrcode";
 import { useTranslation } from "react-i18next";
 import { deriveFromMnemonic, generateMnemonic, validateMnemonic, PEPEPOW, pubkeyToP2PKH } from "@pepepow/wallet-core";
@@ -153,7 +155,7 @@ export default function WalletHome() {
           </div>
           <textarea
             className="input"
-            style={{ marginTop: 6, WebkitTextSecurity: showMnemonic ? "none" : "disc" } as React.CSSProperties}
+            style={{ marginTop: 6, WebkitTextSecurity: showMnemonic ? "none" : "disc" } as CSSProperties}
             value={mnemo}
             onChange={(e) => setMnemo(e.target.value)}
             onBlur={() => {
