@@ -29,6 +29,7 @@ GET /api/wallet/address/{address}
 GET /api/wallet/history/{address}
 GET /api/wallet/utxo/{address}
 GET /api/wallet/tx/{txid}
+GET /api/wallet/tx/{txid}?raw=1
 POST /api/wallet/broadcast
 ```
 
@@ -90,7 +91,7 @@ Source: PEPEW Light API / ElectrumX Gateway
 
 ```text
 GET /api/wallet/utxo/{address}
-GET /api/wallet/tx/{txid}
+GET /api/wallet/tx/{txid}?raw=1
 ```
 
 12. Confirm the signed transaction preview appears with inputs, size, total input, change, and raw hex preview.
@@ -130,6 +131,7 @@ Use DevTools after a production build has been deployed:
 - Open `/wallet/send`.
 - Build a signed transaction with a small test amount.
 - Confirm signing happens without sending mnemonic/private key/WIF/xprv to the server.
+- Confirm previous transaction lookups use `/api/wallet/tx/{txid}?raw=1`.
 - Confirm `/api/wallet/broadcast` is called only after final checkbox confirmation.
 - Confirm `/wallet/send` does not call `/wallet/tx/broadcast`, `/wallet/tx/raw`, `/wallet/utxos`, `/v1/*`, `/auth/telegram`, or `/api/paylink`.
 - Press `Details` on one history item and confirm `/api/wallet/tx/{txid}` is called once.
@@ -173,6 +175,7 @@ For a known transaction from the history response:
 
 ```bash
 curl -i "https://light.pepepow.net/api/wallet/tx/<txid>"
+curl -i "https://light.pepepow.net/api/wallet/tx/<txid>?raw=1"
 ```
 
 Broadcast validation smoke test with invalid raw tx must return a clean 400 error:
