@@ -1,105 +1,41 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import QRCode from "qrcode";
 import { useTranslation } from "react-i18next";
-import {
-  apiFetch,
-  getAuthToken,
-  setAuthToken,
-  upsertProfile,
-  getWhoami,
-  sha256hex,
-  setDefaultAddress as apiSetDefaultAddress,
-  getDefaultAddress as apiGetDefaultAddress,
-  claimPaymentRequest as apiClaimPaymentRequest,
-  getApiUrl,
-  API_BASE,
-  API_ENDPOINTS,
-  withAddress
-} from "../lib/api";
-import { fmtPEPEWFromSats, satsToCoin } from "../lib/format";
 import { deriveFromMnemonic, generateMnemonic, validateMnemonic, PEPEPOW, pubkeyToP2PKH } from "@pepepow/wallet-core";
 import AppLayout from "../components/layout/AppLayout";
 import PageCard from "../components/layout/PageCard";
-import { REFRESH_EVENT, readRefreshPayload } from "../lib/refresh";
-import { getPendingSpendTotal } from "../lib/pending";
-import { walletStore } from "../lib/walletStore";
 import { pepewLightClient, LightAddressBalance } from "../lib/pepewLightClient";
 
 
 type CopyStatus = "idle" | "copied" | "failed";
-
-function maskMnemonic(value: string) {
-  if (!value) return "";
-  return "•".repeat(Math.min(value.length, 64));
-}
 
 function normalizeMnemonicInput(value: string) {
   if (!value) return "";
   return value.normalize("NFKD").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function formatUsdValue(value: number | null) {
-  if (value === null || !Number.isFinite(value)) return "—";
-  const abs = Math.abs(value);
-  if (abs > 0 && abs < 0.01) {
-    return new Intl.NumberFormat("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 8,
-    }).format(value);
+function formatAddressError(error: string | null) {
+  if (!error) return null;
+  if (/unsupported_address_prefix|invalid_address|bad_checksum|address_too_short|address_too_long/i.test(error)) {
+    return "Invalid PEPEW address. Please check the address format and try again.";
   }
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
-function formatUsdPrice(value: number | null) {
-  if (value === null || !Number.isFinite(value)) return "—";
-  return value.toFixed(8);
+  return error;
 }
 
 export default function WalletHome() {
   const { t } = useTranslation();
   const [address, setAddress] = useState(localStorage.getItem("pepew_address") || "");
-  const [balanceSats, setBalanceSats] = useState<number | null>(null);
-  const [balanceError, setBalanceError] = useState<string | null>(null);
-  const [qr, setQr] = useState<string>("");
-  const [usdRate, setUsdRate] = useState<number | null>(null);
-  const [usdError, setUsdError] = useState<string | null>(null);
   const [mnemo, setMnemo] = useState(localStorage.getItem("pepew_mnemonic") || "");
   const [walletError, setWalletError] = useState<string | null>(null);
   const [showMnemonic, setShowMnemonic] = useState(false);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
-  const [amount, setAmount] = useState<string>("");
-  const [memo, setMemo] = useState<string>("");
-  const [payUrl, setPayUrl] = useState<string>("");
-  const [payLinkError, setPayLinkError] = useState<string | null>(null);
-  const [claimStatus, setClaimStatus] = useState<string | null>(null);
-  const [isDefaulting, setIsDefaulting] = useState(false);
-  const [defaultStatus, setDefaultStatus] = useState<string | null>(null);
-  const [defaultStatusIsError, setDefaultStatusIsError] = useState(false);
-  const [needsDefaultSync, setNeedsDefaultSync] = useState(false);
-  const [isDefaultConfirmed, setIsDefaultConfirmed] = useState<boolean | null>(null);
-  const [debugData, setDebugData] = useState<any>(null);
-  const [showDebug, setShowDebug] = useState(new URLSearchParams(window.location.search).get("debug") === "1");
-  const [reopenTip, setReopenTip] = useState(false);
-  const [justSavedDefault, setJustSavedDefault] = useState(false);
-  const [pendingSpendSats, setPendingSpendSats] = useState(0);
-  const [pendingBaselineSats, setPendingBaselineSats] = useState<number | null>(null);
-  const [balanceApiRaw, setBalanceApiRaw] = useState<any>(null);
-  const [utxoSumSats, setUtxoSumSats] = useState<number | null>(null);
-  const [utxoSumError, setUtxoSumError] = useState<string | null>(null);
-  const [balanceDebug, setBalanceDebug] = useState<any>(null);
-  const [priceDebug, setPriceDebug] = useState<any>(null);
-  const [walletState, setWalletState] = useState(walletStore.getState());
+  const [qr, setQr] = useState<string>("");
   const [lightBalance, setLightBalance] = useState<LightAddressBalance | null>(null);
   const [lightBalanceError, setLightBalanceError] = useState<string | null>(null);
   const [lightBalanceLoading, setLightBalanceLoading] = useState(false);
   const defaultPath = "m/44'/5'/0'/0/0";
 
-  const balanceRef = useRef<number | null>(null);
-  const lastRefreshRef = useRef(0);
-  const isTelegram = !!(window as any).Telegram?.WebApp?.initData;
   const normalizedMnemonic = normalizeMnemonicInput(mnemo);
   const mnemonicWordCount = normalizedMnemonic ? normalizedMnemonic.split(" ").length : 0;
   const mnemonicValid = (mnemonicWordCount === 12 || mnemonicWordCount === 24)
@@ -107,266 +43,31 @@ export default function WalletHome() {
   const showMnemonicHint = mnemo.trim().length > 0 && !mnemonicValid;
 
   useEffect(() => {
-    balanceRef.current = balanceSats;
-  }, [balanceSats]);
-
-  const parseNumericField = (value: unknown) => {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "string" && value.trim()) {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    return null;
-  };
-
-  useEffect(() => {
-    return walletStore.subscribe(setWalletState);
-  }, []);
-
-  useEffect(() => {
-    walletStore.setAddress(address);
-  }, [address]);
-
-  useEffect(() => {
-    if (!address) {
+    const trimmed = address.trim();
+    if (!trimmed) {
+      setQr("");
       setLightBalance(null);
       setLightBalanceError(null);
       return;
     }
+
+    localStorage.setItem("pepew_address", trimmed);
+    QRCode.toDataURL(`pepepow:${trimmed}`).then(setQr).catch(() => setQr(""));
+
     let active = true;
-    const fetchLightBalance = async () => {
+    const run = async () => {
       setLightBalanceLoading(true);
       setLightBalanceError(null);
       try {
-        const data = await pepewLightClient.getAddress(address);
+        const data = await pepewLightClient.getAddress(trimmed);
         if (!active) return;
-        if (data && data.balance) {
-          setLightBalance(data.balance);
-        }
-      } catch (err: any) {
+        setLightBalance(data.balance);
+      } catch (e: any) {
         if (!active) return;
-        setLightBalanceError(err.message || "Failed to query Light API balance");
+        setLightBalance(null);
+        setLightBalanceError(formatAddressError(e?.message || "PEPEW Light API lookup failed."));
       } finally {
         if (active) setLightBalanceLoading(false);
-      }
-    };
-    void fetchLightBalance();
-    return () => {
-      active = false;
-    };
-  }, [address, walletState.lastUpdate]);
-
-
-  useEffect(() => {
-    const handleRefresh = (event: Event) => {
-      const detail = (event as CustomEvent).detail as { ts?: number } | undefined;
-      if (detail?.ts && detail.ts <= lastRefreshRef.current) return;
-      if (detail?.ts) lastRefreshRef.current = detail.ts;
-      walletStore.scheduleRefresh();
-    };
-    window.addEventListener(REFRESH_EVENT, handleRefresh);
-    const stored = readRefreshPayload();
-    if (stored?.ts && stored.ts > lastRefreshRef.current) {
-      lastRefreshRef.current = stored.ts;
-      walletStore.scheduleRefresh();
-    }
-    return () => window.removeEventListener(REFRESH_EVENT, handleRefresh);
-  }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const requestId = params.get("requestId") || params.get("claim");
-    if (requestId && address) {
-      void handleClaim(requestId);
-    }
-  }, [address]);
-
-  const handleClaim = async (requestId: string) => {
-    setClaimStatus(t("claim.processing"));
-    try {
-      const res = await apiClaimPaymentRequest(requestId, address);
-      if (res.ok) {
-        setClaimStatus(t("claim.success"));
-      } else {
-        setClaimStatus(res.error || t("claim.failed"));
-      }
-    } catch {
-      setClaimStatus(t("errors.networkError"));
-    }
-  };
-
-  const setAsDefault = async () => {
-    if (!address) return;
-    if (!isTelegram) return;
-    setIsDefaulting(true);
-    setDefaultStatus(null);
-    setDefaultStatusIsError(false);
-    try {
-      const res = await apiSetDefaultAddress(address);
-      if (res.ok) {
-        setDefaultStatus(t("home.defaultAddressSet"));
-        setDefaultStatusIsError(false);
-        // Keep Mini App address in sync so routing uses the new default immediately.
-        if (typeof localStorage !== "undefined") {
-          localStorage.setItem("pepew_address", address);
-        }
-        walletStore.setAddress(address);
-        setNeedsDefaultSync(false);
-        setIsDefaultConfirmed(true);
-        setJustSavedDefault(true);
-        // Refresh to be sure
-        void checkDefault();
-      } else {
-        if (res.error === "Unauthorized") {
-          setDefaultStatus(t("home.defaultSyncTelegramOnly"));
-          setDefaultStatusIsError(true);
-        } else {
-          setDefaultStatus(res.error || t("home.defaultSetFailed"));
-          setDefaultStatusIsError(true);
-        }
-      }
-    } catch {
-      setDefaultStatus(t("errors.networkError"));
-      setDefaultStatusIsError(true);
-    } finally {
-      setIsDefaulting(false);
-      // F1: Rotation logic
-      try {
-        const up = await upsertProfile();
-        if (up.token) {
-          setAuthToken(up.token);
-          if (showDebug) console.info("[home] token rotated after default set");
-        }
-      } catch (e) {
-        if (showDebug) console.error("[home] failed to rotate token", e);
-      }
-
-      // Force a slight delay before checkDefault to ensure DB commit is visible
-      setTimeout(() => void checkDefault(), 200);
-
-      // UX Fallback if still not confirmed after rotation
-      setTimeout(() => {
-        if (!isDefaultConfirmed && (window as any).Telegram?.WebApp?.initData && justSavedDefault) {
-          setReopenTip(true);
-        }
-        setJustSavedDefault(false);
-      }, 1500);
-
-      setTimeout(() => {
-        setDefaultStatus(null);
-        setDefaultStatusIsError(false);
-      }, 3000);
-    }
-  };
-
-  const checkDefault = async () => {
-    try {
-      const res = await apiGetDefaultAddress();
-      if (res.ok && res.address === address) {
-        setIsDefaultConfirmed(true);
-        setNeedsDefaultSync(false);
-      } else {
-        setIsDefaultConfirmed(false);
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  useEffect(() => {
-    if (address && isTelegram) {
-      void checkDefault();
-    }
-
-    if (showDebug) {
-      void (async () => {
-        try {
-          const w = await getWhoami();
-          const token = getAuthToken();
-          const tokenHash8 = token ? (await sha256hex(token)).slice(0, 8) : "none";
-          const telegramWebApp = (window as any).Telegram?.WebApp;
-          setDebugData({
-            API_BASE,
-            tokenHash8,
-            whoami: w,
-            initDataLen: telegramWebApp?.initData?.length ?? 0,
-            hasTelegram: !!telegramWebApp,
-          });
-        } catch (e) {
-          setDebugData({ error: String(e) });
-        }
-      })();
-    }
-  }, [address, isDefaultConfirmed, isTelegram, showDebug]);
-
-  useEffect(() => {
-    let active = true;
-    const run = async () => {
-      setUsdError(null);
-      try {
-        const path = API_ENDPOINTS.wallet.price;
-        const r = await apiFetch(path);
-        const text = await r.text().catch(() => "");
-        let j: any = {};
-        if (text) {
-          try {
-            j = JSON.parse(text);
-          } catch {
-            j = {};
-          }
-        }
-        if (!active) return;
-        const price = typeof j?.price === "number"
-          ? j.price
-          : typeof j?.price === "string"
-            ? Number(j.price)
-            : null;
-        if (!r.ok || !Number.isFinite(price as number) || j?.error) {
-          const detail = typeof j?.error === "string"
-            ? j.error
-            : typeof j?.detail === "string"
-              ? j.detail
-              : typeof j?.message === "string"
-                ? j.message
-                : `HTTP ${r.status}`;
-          setUsdRate(null);
-          // Suppress banner error in normal mode
-          if (showDebug) setUsdError(detail);
-          if (showDebug) {
-            setPriceDebug({
-              lastRequestPath: path,
-              lastRequestUrl: getApiUrl(path),
-              status: r.status,
-              responseText200: text ? text.slice(0, 200) : "",
-              error: detail
-            });
-          }
-          return;
-        }
-        setUsdRate(price);
-        if (showDebug) {
-          setPriceDebug({
-            lastRequestPath: path,
-            lastRequestUrl: getApiUrl(path),
-            status: r.status,
-            responseText200: text ? text.slice(0, 200) : "",
-            error: null
-          });
-        }
-      } catch {
-        if (active) {
-          setUsdRate(null);
-          setUsdError(t("home.usdNetworkError"));
-          if (showDebug) {
-            setPriceDebug({
-              lastRequestPath: API_ENDPOINTS.wallet.price,
-              lastRequestUrl: getApiUrl(API_ENDPOINTS.wallet.price),
-              status: null,
-              responseText200: "",
-              error: t("home.usdNetworkError")
-            });
-          }
-        }
       }
     };
 
@@ -374,57 +75,7 @@ export default function WalletHome() {
     return () => {
       active = false;
     };
-  }, [showDebug, t]);
-
-  const displayBalanceSats = walletStore.getDisplayBalance();
-
-  useEffect(() => {
-    if (!showDebug) {
-      setBalanceDebug(null);
-      return;
-    }
-    setBalanceDebug({
-      address: walletState.address,
-      status: walletState.status,
-      error: walletState.error,
-      utxoSumSats: walletState.utxoSumSats,
-      pendingSpendSats: walletState.pendingSpendSats,
-      optimisticDeductionSats: walletState.optimisticDeductionSats,
-      rawUtxoSumStatus: walletState.rawUtxoSumStatus,
-      rawUtxoSumLastRequestUrl: walletState.rawUtxoSumLastRequestUrl,
-      rawUtxoSumError: walletState.rawUtxoSumError,
-      displayBalanceSats,
-      displayBalanceCoin: displayBalanceSats !== null ? satsToCoin(displayBalanceSats) : null,
-      fmtPEPEWFromSats: {
-        input: displayBalanceSats,
-        output: fmtPEPEWFromSats(displayBalanceSats)
-      }
-    });
-  }, [displayBalanceSats, walletState, showDebug]);
-
-  const genPayLink = async () => {
-    setPayLinkError(null);
-    setPayUrl("");
-    try {
-      const r = await apiFetch("/api/paylink/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address, amount: Number(amount || 0), memo }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setPayLinkError(j?.error || t("home.paylinkFailed"));
-        return;
-      }
-      if (j.url) {
-        setPayUrl(j.url);
-      } else {
-        setPayLinkError(t("home.paylinkFailed"));
-      }
-    } catch {
-      setPayLinkError(t("errors.apiUnreachable"));
-    }
-  };
+  }, [address]);
 
   const createWallet = async () => {
     setWalletError(null);
@@ -434,7 +85,6 @@ export default function WalletHome() {
       const derived = pubkeyToP2PKH(Buffer.from(node.publicKey!), PEPEPOW);
       setMnemo(mnemonic);
       setAddress(derived);
-      setNeedsDefaultSync(true);
       localStorage.setItem("pepew_mnemonic", mnemonic);
       localStorage.setItem("pepew_address", derived);
     } catch {
@@ -443,24 +93,21 @@ export default function WalletHome() {
   };
 
   const applyMnemonic = async () => {
-    const normalized = normalizeMnemonicInput(mnemo);
-    const words = normalized ? normalized.split(" ").length : 0;
-    if (!normalized) {
+    if (!normalizedMnemonic) {
       setWalletError(t("home.mnemonicMissing"));
       return;
     }
-    if ((words !== 12 && words !== 24) || !validateMnemonic(normalized)) {
+    if (!mnemonicValid) {
       setWalletError(t("home.mnemonicInvalid"));
       return;
     }
     setWalletError(null);
     try {
-      setMnemo(normalized);
-      const node = await deriveFromMnemonic(normalized, defaultPath);
+      const node = await deriveFromMnemonic(normalizedMnemonic, defaultPath);
       const derived = pubkeyToP2PKH(Buffer.from(node.publicKey!), PEPEPOW);
+      setMnemo(normalizedMnemonic);
       setAddress(derived);
-      setNeedsDefaultSync(true);
-      localStorage.setItem("pepew_mnemonic", normalized);
+      localStorage.setItem("pepew_mnemonic", normalizedMnemonic);
       localStorage.setItem("pepew_address", derived);
     } catch {
       setWalletError(t("home.mnemonicInvalid"));
@@ -479,15 +126,21 @@ export default function WalletHome() {
     }
   };
 
-  const usdPriceLabel = formatUsdPrice(usdRate);
-  const usdBalanceValue = displayBalanceSats !== null && usdRate !== null
-    ? satsToCoin(displayBalanceSats) * usdRate
-    : null;
-  const usdBalanceLabel = usdBalanceValue !== null ? formatUsdValue(usdBalanceValue) : null;
-
   return (
     <AppLayout>
       <PageCard title={t("title")}>
+        <div className="card" style={{ border: "1px solid rgba(255, 170, 0, 0.45)", marginBottom: 12 }}>
+          <div className="section-title">Non-custodial wallet / 非託管網頁錢包</div>
+          <div className="muted" style={{ marginTop: 6, lineHeight: 1.55 }}>
+            <div>Your mnemonic and private keys stay in your browser.</div>
+            <div>PEPEW Light API only receives addresses for balance and history lookup.</div>
+            <div>Never share or screenshot your mnemonic.</div>
+            <div style={{ marginTop: 6 }}>助記詞與私鑰只會保存在你的瀏覽器本機。</div>
+            <div>PEPEW Light API 只會接收地址，用於查詢餘額與交易紀錄。</div>
+            <div>請勿分享或截圖助記詞。</div>
+          </div>
+        </div>
+
         <div className="card">
           <div className="section-title">{t("home.localWallet")}</div>
           <div className="row" style={{ marginTop: 6 }}>
@@ -518,144 +171,50 @@ export default function WalletHome() {
             </div>
           )}
         </div>
+
         <div className="card">
           <label className="field-label">{t("address")}</label>
           <div className="row">
             <input
               className="input"
-              placeholder="PMXw..."
+              placeholder="P..."
               value={address}
-              onChange={(e) => {
-                setAddress(e.target.value);
-                if (e.target.value.trim()) setNeedsDefaultSync(true);
-              }}
+              onChange={(e) => setAddress(e.target.value.trim())}
             />
-            <button className="btn secondary" onClick={() => localStorage.setItem('pepew_address', address)}>{t("home.save")}</button>
-            <a
-              href={`https://explorer.pepepow.net/address/${address}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn ghost"
-              style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
-            >
-              {t("viewInExplorer")}
-            </a>
+            <button className="btn secondary" onClick={() => localStorage.setItem("pepew_address", address.trim())}>{t("home.save")}</button>
+            <Link className="btn ghost" to="/history" style={{ textDecoration: "none" }}>{t("history.title")}</Link>
           </div>
-          {isTelegram && (
-            <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn secondary" onClick={setAsDefault} disabled={!address || isDefaulting}>
-                {isDefaulting ? "..." : isDefaultConfirmed ? t("home.defaultAddressConfirmed") : t("home.setDefault")}
-              </button>
-              {defaultStatus && <small className={defaultStatusIsError ? "error" : "muted"}>{defaultStatus}</small>}
-              {needsDefaultSync && !defaultStatus && !isDefaultConfirmed && (
-                <small className="muted">{t("home.defaultSyncHint")}</small>
-              )}
-            </div>
-          )}
-          {claimStatus && <div className="muted" style={{ marginTop: 8, fontWeight: "bold" }}>{claimStatus}</div>}
         </div>
 
         {address && (
           <div className="grid two">
             <div className="card">
-              <div className="balance-line">
-                <span>{t("balance")}:</span>
-                <strong>{address ? fmtPEPEWFromSats(displayBalanceSats) : "—"}</strong>
-                {usdBalanceLabel && (
-                  <span className="muted" style={{ marginLeft: 8 }}>
-                    ≈ ${usdBalanceLabel}
-                  </span>
-                )}
-              </div>
-              {pendingSpendSats > 0 && (
-                <div className="muted" style={{ marginTop: 4 }}>
-                  {t("home.pendingSpend")}: {fmtPEPEWFromSats(pendingSpendSats)}
-                </div>
-              )}
-              {lightBalanceLoading && (
-                <div className="muted" style={{ marginTop: 4, fontSize: "0.9em" }}>
-                  Loading Light API balance...
-                </div>
-              )}
-              {lightBalance && (
-                <div className="muted" style={{ marginTop: 4, fontSize: "0.95rem" }}>
-                  <span>Light API Balance: </span>
-                  <strong>{lightBalance.confirmed_pepew} PEPEW</strong>
+              <div className="section-title">Confirmed Balance</div>
+              {lightBalanceLoading ? (
+                <div className="muted" style={{ marginTop: 6 }}>Loading PEPEW Light API balance...</div>
+              ) : lightBalance ? (
+                <>
+                  <div style={{ fontSize: "1.25rem", fontWeight: 700, marginTop: 6 }}>
+                    {lightBalance.confirmed_pepew} PEPEW
+                  </div>
                   {Number(lightBalance.unconfirmed) > 0 && (
-                    <span style={{ marginLeft: 6 }}>
-                      (+{lightBalance.unconfirmed_pepew} unconfirmed)
-                    </span>
+                    <div className="muted" style={{ marginTop: 4 }}>
+                      Unconfirmed: {lightBalance.unconfirmed_pepew} PEPEW
+                    </div>
                   )}
+                  <div className="muted" style={{ marginTop: 6 }}>Source: PEPEW Light API / ElectrumX Gateway</div>
+                </>
+              ) : (
+                <div className="error" style={{ marginTop: 6 }}>
+                  {lightBalanceError || "PEPEW Light API balance unavailable."}
                 </div>
               )}
-              {lightBalanceError && (
-                <div className="error" style={{ marginTop: 4, fontSize: "0.85rem" }}>
-                  Light API Error: {lightBalanceError}
-                </div>
-              )}
-              {showDebug && walletState.error && <div className="error" style={{ marginTop: 4 }}>{walletState.error}</div>}
-
-              <div className="muted" style={{ marginTop: 6 }}>
-                {t("home.usdLabel")}: <strong>{usdPriceLabel}</strong>{" "}
-                {showDebug && usdError && (
-                  <span className="error" style={{ marginLeft: 4 }}>
-                    ({usdError})
-                  </span>
-                )}
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <div className="section-title">{t("receive")}</div>
-                {qr && <img alt="qr" src={qr} className="qr" />}
-              </div>
             </div>
             <div className="card">
-              <div className="section-title">{t("createPayLink")}</div>
-              <div className="field">
-                <label className="field-label">{t("home.amountLabel")}</label>
-                <input className="input" value={amount} onChange={e => setAmount(e.target.value)} />
-              </div>
-              <div className="field">
-                <label className="field-label">{t("memo")}</label>
-                <input className="input" value={memo} onChange={e => setMemo(e.target.value)} />
-              </div>
-              <button className="btn" onClick={genPayLink}>{t("generate")}</button>
-              {payLinkError && <div className="error" style={{ marginTop: 6 }}>{payLinkError}</div>}
-              {payUrl && <div style={{ marginTop: 8 }}><small>{t("home.payUrlLabel")}:</small> <a href={payUrl} target="_blank" rel="noreferrer">{payUrl}</a></div>}
+              <div className="section-title">{t("receive")}</div>
+              <code style={{ wordBreak: "break-all" }}>{address}</code>
+              {qr && <div style={{ marginTop: 12 }}><img alt="qr" src={qr} className="qr" /></div>}
             </div>
-          </div>
-        )}
-
-        {reopenTip && (
-          <div className="card" style={{ border: '2px dashed #ffaa00', marginTop: 20 }}>
-            <div style={{ color: '#ffaa00', fontWeight: 'bold' }}>
-              {t("home.telegramReopenTip")}
-            </div>
-            <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn secondary" onClick={() => window.location.reload()}>{t("history.refresh")}</button>
-              <button className="btn ghost" onClick={() => {
-                navigator.clipboard.writeText(t("home.telegramReopenTip"));
-              }}>{t("copy")}</button>
-            </div>
-          </div>
-        )}
-
-        {showDebug && debugData && (
-          <div className="card muted" style={{ marginTop: 20, fontSize: '0.8em' }}>
-            <div style={{ fontWeight: 'bold' }}>{t("home.debugTitle")}</div>
-            {balanceDebug && (
-              <pre style={{ whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 200 }}>
-                {JSON.stringify({ balance: balanceDebug }, null, 2)}
-              </pre>
-            )}
-            {priceDebug && (
-              <pre style={{ whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 200 }}>
-                {JSON.stringify({ price: priceDebug }, null, 2)}
-              </pre>
-            )}
-            <pre style={{ whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 200 }}>
-              {JSON.stringify(debugData, null, 2)}
-            </pre>
-            <button className="btn ghost" onClick={() => setShowDebug(false)}>{t("home.hideDebug")}</button>
           </div>
         )}
       </PageCard>
