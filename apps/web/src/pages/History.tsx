@@ -65,8 +65,8 @@ function parseHistoryPayload(payload: any) {
       const history = Array.isArray(payload.history) ? payload.history : [];
       txs = [...mempool, ...history].map((tx: any) => ({
         txid: tx.txid || tx.tx_hash || "",
-        height: tx.height || 0,
-        time: tx.time || tx.blocktime || null,
+        height: Number(tx.height ?? 0),
+        time: tx.time || tx.blocktime || tx.timestamp || null,
       }));
     }
     return { ...payload, txs, source: payload.source || "PEPEW Light API" };
@@ -101,11 +101,11 @@ function parseTxTimestampMs(tx: any): number | null {
 
 function formatTimeLabel(tx: any): string {
   const tsMs = parseTxTimestampMs(tx);
-  if (tsMs === null) return "--";
+  if (tsMs === null) return "Time unavailable";
   try {
     return new Date(tsMs).toLocaleString();
   } catch {
-    return "--";
+    return "Time unavailable";
   }
 }
 
@@ -124,7 +124,8 @@ function formatHeightLabel(tx: any): string {
 
 function formatStatusLabel(tx: any): string {
   const height = Number(tx?.height ?? 0);
-  if (!Number.isFinite(height) || height <= 0) return "Unconfirmed";
+  if (!Number.isFinite(height)) return "Unknown";
+  if (height <= 0) return "Unconfirmed";
   return "Confirmed";
 }
 
@@ -140,7 +141,9 @@ function summarizeTxDetail(payload: any) {
     return {
       type: "raw hex",
       size: compact.length ? `${compact.length} hex chars` : "--",
-      preview: compact.length > 160 ? `${compact.slice(0, 160)}…` : compact || "--",
+      time: "Time unavailable",
+      confirmations: "--",
+      preview: compact.length > 360 ? `${compact.slice(0, 360)}…` : compact || "--",
     };
   }
   if (txData && typeof txData === "object") {
@@ -149,10 +152,12 @@ function summarizeTxDetail(payload: any) {
     return {
       type: "decoded object",
       size: inputCount !== null || outputCount !== null ? `${inputCount ?? "?"} inputs / ${outputCount ?? "?"} outputs` : "object",
+      time: formatTimeLabel(txData),
+      confirmations: txData.confirmations ?? txData.confirmed ?? "--",
       preview: JSON.stringify(txData, null, 2).slice(0, 1800),
     };
   }
-  return { type: typeof txData, size: "--", preview: String(txData ?? "--") };
+  return { type: typeof txData, size: "--", time: "Time unavailable", confirmations: "--", preview: String(txData ?? "--") };
 }
 
 export default function History() {
@@ -263,7 +268,7 @@ export default function History() {
 
   const txViewModels = useMemo<TxSummaryViewModel[]>(() => {
     return txs.map((tx: any, idx: number) => {
-      const txid = String(tx?.txid || "");
+      const txid = String(tx?.txid || tx?.tx_hash || "");
       return {
         key: txid || `tx-${idx}`,
         txid,
@@ -297,6 +302,10 @@ export default function History() {
 
   const openTxDetail = async (txid: string) => {
     if (!txid) return;
+    if (txDetail?.txid === txid && !txDetail.loading) {
+      setTxDetail(null);
+      return;
+    }
     const cached = txDetailCacheRef.current.get(txid);
     if (cached) {
       setTxDetail({ txid, loading: false, error: null, data: cached });
@@ -314,6 +323,7 @@ export default function History() {
   };
 
   const handleRefresh = () => {
+    setTxDetail(null);
     forceNextFetchRef.current = true;
     setReloadKey((v) => v + 1);
   };
@@ -322,7 +332,7 @@ export default function History() {
     setHistoryLimit(SHOW_MORE_HISTORY_LIMIT);
   };
 
-  const detailSummary = txDetail?.data ? summarizeTxDetail(txDetail.data) : null;
+  const activeDetailSummary = txDetail?.data ? summarizeTxDetail(txDetail.data) : null;
 
   return (
     <AppLayout>
@@ -364,44 +374,79 @@ export default function History() {
               <>
                 <div className="tx-list">
                   {txViewModels.map((tx) => {
+                    const isActiveDetail = txDetail?.txid === tx.txid;
+                    const detailSummary = isActiveDetail ? activeDetailSummary : null;
                     return (
-                      <div key={tx.key} className="tx-row">
-                        <div className="tx-info">
-                          <div className="tx-line">
-                            <span className="muted">Status: </span>
-                            <span>{tx.statusLabel}</span>
-                            <span className="muted" style={{ marginLeft: 8 }}>Height: </span>
-                            <span>{tx.heightLabel}</span>
+                      <div key={tx.key}>
+                        <div className="tx-row">
+                          <div className="tx-info">
+                            <div className="tx-line">
+                              <span className="muted">Status: </span>
+                              <strong>{tx.statusLabel}</strong>
+                              <span className="muted" style={{ marginLeft: 8 }}>Height: </span>
+                              <span>{tx.heightLabel}</span>
+                            </div>
+                            <div className="tx-line">
+                              <span className="muted">{t("history.timeLabel")}: </span>
+                              <span>{tx.timeLabel}</span>
+                            </div>
+                            <div className="tx-line">
+                              <span className="muted">{t("history.txidLabel")}: </span>
+                              <code title={tx.txid}>{shortTxid(tx.txid)}</code>
+                            </div>
                           </div>
-                          <div className="tx-line">
-                            <span className="muted">{t("history.timeLabel")}: </span>
-                            <span>{tx.timeLabel}</span>
-                          </div>
-                          <div className="tx-line">
-                            <span className="muted">{t("history.txidLabel")}: </span>
-                            <code title={tx.txid}>{shortTxid(tx.txid)}</code>
+
+                          <div className="tx-actions">
+                            <button className="btn ghost small" onClick={() => openTxDetail(tx.txid)} disabled={!tx.txid || txDetail?.loading}>
+                              {isActiveDetail ? (txDetail?.loading ? "Loading..." : "Hide details") : "Details"}
+                            </button>
+                            <button className="btn ghost small" onClick={() => copyTxid(tx.txid)} disabled={!tx.txid}>
+                              {copiedTxid === tx.txid ? t("copied") : t("copy")}
+                            </button>
+                            {tx.txid && (
+                              <a
+                                href={`${EXPLORER_BASE_URL}/tx/${tx.txid}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="btn ghost small"
+                                title={t("viewInExplorer")}
+                              >
+                                {t("viewInExplorer")}
+                              </a>
+                            )}
                           </div>
                         </div>
 
-                        <div className="tx-actions">
-                          <button className="btn ghost small" onClick={() => openTxDetail(tx.txid)} disabled={!tx.txid}>
-                            Details
-                          </button>
-                          <button className="btn ghost small" onClick={() => copyTxid(tx.txid)} disabled={!tx.txid}>
-                            {copiedTxid === tx.txid ? t("copied") : t("copy")}
-                          </button>
-                          {tx.txid && (
-                            <a
-                              href={`${EXPLORER_BASE_URL}/tx/${tx.txid}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="btn ghost small"
-                              title={t("viewInExplorer")}
-                            >
-                              {t("viewInExplorer")}
-                            </a>
-                          )}
-                        </div>
+                        {isActiveDetail && (
+                          <div className="card" style={{ marginTop: 8, marginBottom: 8 }}>
+                            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+                              <div>
+                                <div className="section-title">Transaction details</div>
+                                <div className="muted" style={{ wordBreak: "break-all", marginTop: 2 }}>
+                                  {tx.txid}
+                                </div>
+                              </div>
+                              <button className="btn ghost small" onClick={() => setTxDetail(null)}>Close</button>
+                            </div>
+                            {txDetail.loading ? (
+                              <p className="muted">Loading transaction from PEPEW Light API...</p>
+                            ) : txDetail.error ? (
+                              <p className="error">{txDetail.error}</p>
+                            ) : detailSummary ? (
+                              <div>
+                                <div className="row" style={{ gap: 18, marginBottom: 8 }}>
+                                  <div><span className="muted">Type: </span><strong>{detailSummary.type}</strong></div>
+                                  <div><span className="muted">Size: </span><strong>{detailSummary.size}</strong></div>
+                                  <div><span className="muted">Time: </span><strong>{detailSummary.time}</strong></div>
+                                  <div><span className="muted">Confirmations: </span><strong>{detailSummary.confirmations}</strong></div>
+                                </div>
+                                <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 360, overflow: "auto" }}>
+                                  {detailSummary.preview}
+                                </pre>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -420,36 +465,6 @@ export default function History() {
         ) : (
           <div className="card">
             <p>{t("history.loading")}</p>
-          </div>
-        )}
-
-        {txDetail && (
-          <div className="card" style={{ marginTop: 12 }}>
-            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-              <div>
-                <div className="section-title">Transaction details</div>
-                <div className="muted" style={{ wordBreak: "break-all", marginTop: 2 }}>
-                  {txDetail.txid}
-                </div>
-              </div>
-              <button className="btn ghost small" onClick={() => setTxDetail(null)}>Close</button>
-            </div>
-            {txDetail.loading ? (
-              <p className="muted">Loading transaction from PEPEW Light API...</p>
-            ) : txDetail.error ? (
-              <p className="error">{txDetail.error}</p>
-            ) : detailSummary ? (
-              <div>
-                <div className="row" style={{ gap: 18, marginBottom: 8 }}>
-                  <div><span className="muted">Type: </span><strong>{detailSummary.type}</strong></div>
-                  <div><span className="muted">Size: </span><strong>{detailSummary.size}</strong></div>
-                  <div><span className="muted">Source: </span><strong>PEPEW Light API</strong></div>
-                </div>
-                <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 360, overflow: "auto" }}>
-                  {detailSummary.preview}
-                </pre>
-              </div>
-            ) : null}
           </div>
         )}
 
