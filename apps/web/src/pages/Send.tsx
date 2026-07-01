@@ -11,6 +11,8 @@ const DEFAULT_PATH = "m/44'/5'/0'/0/0";
 const DEFAULT_FEE = "0.0001";
 const DUST_ATOMIC = 546n;
 const MAX_INPUTS = 80;
+const RECENT_RECIPIENTS_KEY = "pepew_recent_recipients";
+const MAX_RECENT_RECIPIENTS = 8;
 
 type SendPhase = "idle" | "loading_utxos" | "fetching_prevtx" | "signing" | "ready" | "broadcasting" | "broadcasted" | "error";
 
@@ -22,6 +24,12 @@ type SignedPreview = {
   amount: bigint;
   fee: bigint;
   change: bigint;
+  totalSpent: bigint;
+};
+
+type RecentRecipient = {
+  address: string;
+  lastUsedAt: number;
 };
 
 function normalizeAddressInput(value: string) {
@@ -42,10 +50,10 @@ function parseAtomicInput(value: string) {
   }
 }
 
-function shortHex(value: string) {
+function shortAddress(value: string) {
   if (!value) return "--";
-  if (value.length <= 96) return value;
-  return `${value.slice(0, 96)}…${value.slice(-32)}`;
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 10)}…${value.slice(-6)}`;
 }
 
 function extractRawTx(payload: any): string | null {
@@ -75,6 +83,32 @@ function toWalletCoreUtxo(utxo: LightUtxo, rawTx: string): UTXO {
   };
 }
 
+function loadRecentRecipients(): RecentRecipient[] {
+  try {
+    const raw = localStorage.getItem(RECENT_RECIPIENTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => typeof item?.address === "string" && item.address)
+      .map((item) => ({ address: item.address, lastUsedAt: Number(item.lastUsedAt || 0) }))
+      .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+      .slice(0, MAX_RECENT_RECIPIENTS);
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentRecipient(address: string) {
+  const normalized = normalizeAddressInput(address);
+  if (!normalized) return loadRecentRecipients();
+  const next = [
+    { address: normalized, lastUsedAt: Date.now() },
+    ...loadRecentRecipients().filter((item) => item.address !== normalized),
+  ].slice(0, MAX_RECENT_RECIPIENTS);
+  localStorage.setItem(RECENT_RECIPIENTS_KEY, JSON.stringify(next));
+  return next;
+}
+
 export default function Send() {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
@@ -83,6 +117,8 @@ export default function Send() {
   const [to, setTo] = useState(searchParams.get("to") || "");
   const [amount, setAmount] = useState(searchParams.get("amount") || "");
   const [fee, setFee] = useState(DEFAULT_FEE);
+  const [subtractFee, setSubtractFee] = useState(false);
+  const [recentRecipients, setRecentRecipients] = useState<RecentRecipient[]>(() => loadRecentRecipients());
   const [balance, setBalance] = useState<LightAddressBalance | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
@@ -95,6 +131,14 @@ export default function Send() {
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
   const amountAtomic = useMemo(() => parseAtomicInput(amount), [amount]);
   const feeAtomic = useMemo(() => parseAtomicInput(fee), [fee]);
+  const recipientAmountAtomic = useMemo(() => {
+    if (!amountAtomic || !feeAtomic) return null;
+    return subtractFee ? amountAtomic - feeAtomic : amountAtomic;
+  }, [amountAtomic, feeAtomic, subtractFee]);
+  const totalSpentAtomic = useMemo(() => {
+    if (!amountAtomic || !feeAtomic) return null;
+    return subtractFee ? amountAtomic : amountAtomic + feeAtomic;
+  }, [amountAtomic, feeAtomic, subtractFee]);
   const confirmedAtomic = useMemo(() => {
     const n = BigInt(Math.max(0, Math.trunc(Number(balance?.confirmed ?? 0))));
     return n;
@@ -106,12 +150,13 @@ export default function Send() {
     if (!normalizedTo) return "Enter a recipient PEPEW address.";
     if (!amountAtomic) return "Enter a valid send amount.";
     if (!feeAtomic) return "Enter a valid fee.";
-    if (amountAtomic <= DUST_ATOMIC) return "Amount is below the dust threshold.";
-    if (confirmedAtomic > 0n && amountAtomic + feeAtomic > confirmedAtomic) {
-      return "Amount plus fee is greater than the confirmed balance.";
+    if (!recipientAmountAtomic || recipientAmountAtomic <= DUST_ATOMIC) return "Recipient amount is below the dust threshold after fee.";
+    if (!totalSpentAtomic || totalSpentAtomic <= 0n) return "Total spent amount is invalid.";
+    if (confirmedAtomic > 0n && totalSpentAtomic > confirmedAtomic) {
+      return "Amount and fee are greater than the confirmed balance.";
     }
     return null;
-  }, [fromAddress, mnemonic, normalizedTo, amountAtomic, feeAtomic, confirmedAtomic]);
+  }, [fromAddress, mnemonic, normalizedTo, amountAtomic, feeAtomic, recipientAmountAtomic, totalSpentAtomic, confirmedAtomic]);
 
   useEffect(() => {
     if (!fromAddress) return;
@@ -142,12 +187,12 @@ export default function Send() {
     setConfirmedReview(false);
     setBroadcastTxid(null);
     if (phase !== "idle") setPhase("idle");
-  }, [to, amount, fee]);
+  }, [to, amount, fee, subtractFee]);
 
   const buildSignedTx = async () => {
-    if (validationError || !amountAtomic || !feeAtomic) {
+    if (validationError || !recipientAmountAtomic || !feeAtomic || !totalSpentAtomic) {
       setError(validationError || "Invalid send form.");
-      return;
+      return null;
     }
     setError(null);
     setSignedPreview(null);
@@ -160,13 +205,12 @@ export default function Send() {
       const spendable = utxoResult.utxos.filter((u) => Number(u.height) > 0 && Number(u.value) > 0);
       if (!spendable.length) throw new Error("No confirmed UTXOs available for sending.");
 
-      const target = amountAtomic + feeAtomic;
       const selected = selectUtxos(
         spendable.map((u) => ({ txid: u.txid, vout: u.vout, value: String(u.value), nonWitnessUtxo: "00" })),
-        target.toString(),
+        totalSpentAtomic.toString(),
       );
       if (selected.picked.length > MAX_INPUTS) {
-        throw new Error(`Too many inputs selected (${selected.picked.length}). Consolidation is required before sending.`);
+        throw new Error(`Too many inputs selected (${selected.picked.length}). Use Advanced consolidation first.`);
       }
 
       const selectedKeys = new Set(selected.picked.map((u) => `${u.txid}:${u.vout}`));
@@ -188,34 +232,39 @@ export default function Send() {
         utxos: coreUtxos,
         wif,
         to: normalizedTo,
-        amount: amountAtomic.toString(),
+        amount: recipientAmountAtomic.toString(),
         changeAddress: fromAddress,
         fee: feeAtomic.toString(),
       });
-      const change = selected.total - amountAtomic - feeAtomic;
-      setSignedPreview({
+      const change = selected.total - recipientAmountAtomic - feeAtomic;
+      const preview = {
         rawTx,
         txBytes: rawTx.length / 2,
         selectedCount: coreUtxos.length,
         totalIn: selected.total,
-        amount: amountAtomic,
+        amount: recipientAmountAtomic,
         fee: feeAtomic,
         change,
-      });
+        totalSpent: totalSpentAtomic,
+      };
+      setSignedPreview(preview);
       setPhase("ready");
+      return preview;
     } catch (e: any) {
-      setError(e?.message || "Failed to build signed transaction.");
+      setError(e?.message || "Failed to prepare transaction.");
       setPhase("error");
+      return null;
     }
   };
 
-  const broadcast = async () => {
-    if (!signedPreview || !confirmedReview) return;
+  const broadcast = async (preview = signedPreview) => {
+    if (!preview) return;
     setError(null);
     setPhase("broadcasting");
     try {
-      const result = await pepewLightClient.broadcastSignedRawTx(signedPreview.rawTx);
+      const result = await pepewLightClient.broadcastSignedRawTx(preview.rawTx);
       setBroadcastTxid(result.txid || null);
+      setRecentRecipients(saveRecentRecipient(normalizedTo));
       setPhase("broadcasted");
       setConfirmedReview(false);
     } catch (e: any) {
@@ -224,20 +273,21 @@ export default function Send() {
     }
   };
 
+  const handlePrimarySend = async () => {
+    if (phase === "ready" && signedPreview && confirmedReview) {
+      await broadcast(signedPreview);
+      return;
+    }
+    await buildSignedTx();
+  };
+
   const busy = phase === "loading_utxos" || phase === "fetching_prevtx" || phase === "signing" || phase === "broadcasting";
+  const primaryButtonLabel = phase === "ready" ? "Confirm send" : phase === "broadcasting" ? "Broadcasting..." : "Send PEPEW";
+  const consolidationNeeded = balance && Number((balance as any).history_count || 0) > 50;
 
   return (
     <AppLayout>
       <PageCard title="Send PEPEW">
-        <div className="card" style={{ border: "1px solid rgba(255, 170, 0, 0.45)", marginBottom: 12 }}>
-          <div className="section-title">Client-side signing</div>
-          <div className="muted" style={{ marginTop: 6, lineHeight: 1.55 }}>
-            <div>Your mnemonic and private key stay in this browser.</div>
-            <div>The server only receives the signed raw transaction after final confirmation.</div>
-            <div>Review recipient, amount, fee, and change before broadcasting.</div>
-          </div>
-        </div>
-
         {!fromAddress ? (
           <div className="card">
             <p className="error">Create or import a wallet before sending.</p>
@@ -262,6 +312,25 @@ export default function Send() {
                 onChange={(e) => setTo(e.target.value)}
                 disabled={busy}
               />
+              {recentRecipients.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <div className="muted" style={{ marginBottom: 6 }}>Recent recipients</div>
+                  <div className="row" style={{ gap: 8 }}>
+                    {recentRecipients.map((item) => (
+                      <button
+                        key={item.address}
+                        className="btn ghost small"
+                        type="button"
+                        onClick={() => setTo(item.address)}
+                        disabled={busy}
+                        title={item.address}
+                      >
+                        {shortAddress(item.address)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="grid two" style={{ marginTop: 12 }}>
                 <div>
@@ -287,49 +356,67 @@ export default function Send() {
                   />
                 </div>
               </div>
+              <label className="row" style={{ marginTop: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={subtractFee}
+                  onChange={(e) => setSubtractFee(e.target.checked)}
+                  disabled={busy}
+                />
+                <span>Subtract fee from amount</span>
+              </label>
             </div>
 
             <div className="card">
               <div className="section-title">Review</div>
               <div style={{ marginTop: 8 }}><span className="muted">To: </span><code style={{ wordBreak: "break-all" }}>{normalizedTo || "--"}</code></div>
-              <div style={{ marginTop: 8 }}><span className="muted">Amount: </span><strong>{amountAtomic ? `${formatAtomicToPepew(amountAtomic)} PEPEW` : "--"}</strong></div>
-              <div style={{ marginTop: 8 }}><span className="muted">Fee: </span><strong>{feeAtomic ? `${formatAtomicToPepew(feeAtomic)} PEPEW` : "--"}</strong></div>
+              <div style={{ marginTop: 8 }}><span className="muted">Recipient receives: </span><strong>{recipientAmountAtomic && recipientAmountAtomic > 0n ? `${formatAtomicToPepew(recipientAmountAtomic)} PEPEW` : "--"}</strong></div>
+              <div style={{ marginTop: 8 }}><span className="muted">Network fee: </span><strong>{feeAtomic ? `${formatAtomicToPepew(feeAtomic)} PEPEW` : "--"}</strong></div>
+              <div style={{ marginTop: 8 }}><span className="muted">Total spent: </span><strong>{totalSpentAtomic ? `${formatAtomicToPepew(totalSpentAtomic)} PEPEW` : "--"}</strong></div>
               {validationError && <p className="error" style={{ marginTop: 10 }}>{validationError}</p>}
               {error && <p className="error" style={{ marginTop: 10 }}>{error}</p>}
               {phase !== "idle" && phase !== "ready" && phase !== "broadcasted" && (
                 <p className="muted" style={{ marginTop: 10 }}>Status: {phase.replace(/_/g, " ")}</p>
               )}
-              <button className="btn" onClick={buildSignedTx} disabled={busy || Boolean(validationError)} style={{ marginTop: 10 }}>
-                Build signed transaction
+              {signedPreview && phase === "ready" && (
+                <div style={{ marginTop: 10 }}>
+                  <div className="grid two" style={{ marginTop: 8 }}>
+                    <div><span className="muted">Inputs: </span><strong>{signedPreview.selectedCount}</strong></div>
+                    <div><span className="muted">Size: </span><strong>{signedPreview.txBytes} bytes</strong></div>
+                    <div><span className="muted">Total input: </span><strong>{formatAtomicToPepew(signedPreview.totalIn)} PEPEW</strong></div>
+                    <div><span className="muted">Change: </span><strong>{formatAtomicToPepew(signedPreview.change)} PEPEW</strong></div>
+                  </div>
+                  <label className="row" style={{ marginTop: 10 }}>
+                    <input
+                      type="checkbox"
+                      checked={confirmedReview}
+                      onChange={(e) => setConfirmedReview(e.target.checked)}
+                      disabled={phase === "broadcasting" || phase === "broadcasted"}
+                    />
+                    <span>I reviewed recipient, amount, fee, and change.</span>
+                  </label>
+                </div>
+              )}
+              <button
+                className="btn"
+                onClick={handlePrimarySend}
+                disabled={busy || Boolean(validationError) || (phase === "ready" && !confirmedReview)}
+                style={{ marginTop: 10 }}
+              >
+                {primaryButtonLabel}
               </button>
             </div>
 
-            {signedPreview && (
-              <div className="card">
-                <div className="section-title">Signed transaction preview</div>
-                <div className="grid two" style={{ marginTop: 8 }}>
-                  <div><span className="muted">Inputs: </span><strong>{signedPreview.selectedCount}</strong></div>
-                  <div><span className="muted">Size: </span><strong>{signedPreview.txBytes} bytes</strong></div>
-                  <div><span className="muted">Total input: </span><strong>{formatAtomicToPepew(signedPreview.totalIn)} PEPEW</strong></div>
-                  <div><span className="muted">Change: </span><strong>{formatAtomicToPepew(signedPreview.change)} PEPEW</strong></div>
-                </div>
-                <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 180, overflow: "auto", marginTop: 10 }}>
-                  {shortHex(signedPreview.rawTx)}
-                </pre>
-                <label className="row" style={{ marginTop: 10 }}>
-                  <input
-                    type="checkbox"
-                    checked={confirmedReview}
-                    onChange={(e) => setConfirmedReview(e.target.checked)}
-                    disabled={phase === "broadcasting" || phase === "broadcasted"}
-                  />
-                  <span>I confirm the recipient, amount, fee, and change are correct.</span>
-                </label>
-                <button className="btn" onClick={broadcast} disabled={!confirmedReview || phase === "broadcasting" || phase === "broadcasted"} style={{ marginTop: 10 }}>
-                  Broadcast signed transaction
-                </button>
+            <details className="details">
+              <summary>Advanced: UTXO consolidation assessment</summary>
+              <div style={{ marginTop: 8 }} className="muted">
+                Consolidation can combine many small confirmed UTXOs into one output to your own current wallet address. It is optional, spends a transaction fee, and should remain a manual action.
               </div>
-            )}
+              <div style={{ marginTop: 8 }}>
+                Current send input limit: <strong>{MAX_INPUTS}</strong>. If a send needs more inputs, split the payment or consolidate UTXOs first.
+              </div>
+              {consolidationNeeded && <p className="muted">This wallet may benefit from consolidation later. Full consolidation broadcast is intentionally not automated.</p>}
+            </details>
 
             {phase === "broadcasted" && (
               <div className="card">
