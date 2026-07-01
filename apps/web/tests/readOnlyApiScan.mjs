@@ -5,7 +5,7 @@ const root = process.cwd();
 const distRoot = path.join(root, "apps/web/dist");
 
 if (!fs.existsSync(distRoot)) {
-  console.error("apps/web/dist not found. Run `npm run build` before readOnlyApiScan.");
+  console.error("apps/web/dist not found. Run `npm run build` before scan:readonly-api.");
   process.exit(1);
 }
 
@@ -62,4 +62,4 @@ if (hits.length) {
   process.exit(1);
 }
 
-console.log("Read-only API scan passed. No legacy wallet API references found in apps/web/dist.");
+console.log("Wallet API scan passed. No legacy wallet API references found in apps/web/dist.");
