@@ -26,6 +26,7 @@ export default function Header({ compact }: HeaderProps) {
 
   const navItems: NavItem[] = [
     { to: "/", label: t("nav.home"), short: t("nav.homeShort") },
+    { to: "/send", label: t("nav.send"), short: t("nav.sendShort") },
     { to: "/history", label: t("nav.history"), short: t("nav.historyShort") },
   ];
 
