@@ -175,7 +175,7 @@ export default function Send() {
       setPhase("fetching_prevtx");
       const coreUtxos: UTXO[] = [];
       for (const item of selectedLight) {
-        const tx = await pepewLightClient.getTx(item.txid);
+        const tx = await pepewLightClient.getTx(item.txid, true);
         const rawTx = extractRawTx(tx);
         if (!rawTx) throw new Error(`Previous transaction raw hex unavailable for ${item.txid}.`);
         coreUtxos.push(toWalletCoreUtxo(item, rawTx));
