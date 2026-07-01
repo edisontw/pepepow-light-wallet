@@ -115,7 +115,9 @@ journalctl -u pepew-light -n 500 --no-pager 2>/dev/null | grep -Ei "mnemonic|see
 cd /home/ubuntu/pepepow-light-wallet
 git status --short
 export PATH="/home/ubuntu/node-dist/bin:$PATH"
+npm --prefix apps/web run test:client
 npm run build
+node apps/web/tests/readOnlyApiScan.mjs
 sudo rsync -a --delete apps/web/dist/ /var/www/pepepow-light-wallet/
 ```
 
@@ -135,6 +137,14 @@ curl -i "https://light.pepepow.net/api/wallet/tx/<txid>"
 ```
 
 ## Legacy API scan
+
+Preferred scan:
+
+```bash
+node apps/web/tests/readOnlyApiScan.mjs
+```
+
+Fallback scan:
 
 ```bash
 grep -RIn "api.pepepow.net" apps/web/dist apps/web/src || true
