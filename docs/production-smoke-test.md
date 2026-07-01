@@ -17,7 +17,9 @@ https://light.pepepow.net/wallet/
 - Send page builds and signs transactions in the browser only.
 - Send page broadcasts only after explicit final confirmation.
 - History page loads.
-- Transaction detail loads only after pressing `Details` on a history row.
+- History rows always show deterministic `Status` and `Height`.
+- History row `Time` may show `Time unavailable` because ElectrumX history does not always include block timestamps.
+- Transaction detail expands directly below the selected history row after pressing `Details`.
 - API errors display as clean user-facing messages.
 
 ## Browser DevTools Network checks
@@ -112,14 +114,16 @@ POST /api/wallet/broadcast
 17. Confirm the broadcast response shows a txid or a clean user-facing error.
 18. Confirm no legacy wallet APIs are called.
 19. Open the history page and confirm history loads.
-20. Press `Details` on one transaction row and confirm a transaction detail card appears.
-21. Confirm the detail request is only:
+20. Confirm every history row shows `Status` and `Height` immediately.
+21. Confirm `Time unavailable` is shown instead of a blank timestamp when no timestamp is available.
+22. Press `Details` on one transaction row and confirm a transaction detail card expands directly below that row.
+23. Confirm the detail request is only:
 
 ```text
 GET /api/wallet/tx/{txid}
 ```
 
-22. In DevTools Network and Console, search for the forbidden terms above.
+24. In DevTools Network and Console, search for the forbidden terms above.
 
 ## Post-deploy browser checklist
 
@@ -134,6 +138,8 @@ Use DevTools after a production build has been deployed:
 - Confirm previous transaction lookups use `/api/wallet/tx/{txid}?raw=1`.
 - Confirm `/api/wallet/broadcast` is called only after final checkbox confirmation.
 - Confirm `/wallet/send` does not call `/wallet/tx/broadcast`, `/wallet/tx/raw`, `/wallet/utxos`, `/v1/*`, `/auth/telegram`, or `/api/paylink`.
+- Open `/wallet/history`.
+- Confirm history row details expand inline below the clicked transaction row.
 - Press `Details` on one history item and confirm `/api/wallet/tx/{txid}` is called once.
 - Filter Network requests for `mnemonic`, `seed`, `private`, `xprv`, `wif`.
 - Confirm Light API calls include only addresses, txids, UTXO lookup, tx lookup, or signed raw tx broadcast.
