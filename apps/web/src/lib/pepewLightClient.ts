@@ -28,11 +28,34 @@ export interface LightHistoryResponse {
   read_only: boolean;
 }
 
+export interface LightUtxo {
+  txid: string;
+  vout: number;
+  height: number;
+  value: number;
+}
+
+export interface LightUtxoResponse {
+  address: string;
+  utxos: LightUtxo[];
+  utxo_count: number;
+  total: number;
+  source: string;
+  read_only: boolean;
+}
+
 export interface LightTxResponse {
   txid: string;
   data: any;
   source: string;
   read_only: boolean;
+}
+
+export interface LightBroadcastResponse {
+  ok: boolean;
+  txid?: string | null;
+  source: string;
+  signed_raw_tx_only: boolean;
 }
 
 function normalizeLightApiBase(value?: string) {
@@ -67,6 +90,12 @@ function mapLightApiError(raw: string, status?: number) {
     text.includes("invalid pepew address")
   ) {
     return ADDRESS_ERROR_MESSAGE;
+  }
+  if (text.includes("broadcast_rejected")) {
+    return "Transaction was rejected by the network.";
+  }
+  if (text.includes("invalid_raw_tx") || text.includes("raw_tx_too")) {
+    return "Signed transaction is invalid.";
   }
   if (status === 429 || text.includes("too many requests") || text.includes("rate limit")) {
     return RATE_LIMIT_MESSAGE;
@@ -151,11 +180,37 @@ export class PepewLightApiClient {
     return res.json();
   }
 
+  async getUtxo(address: string): Promise<LightUtxoResponse> {
+    if (!address) {
+      throw new Error("Address is required");
+    }
+    const res = await this.fetchWithTimeout(`/api/wallet/utxo/${address}`);
+    if (!res.ok) {
+      throw new Error(await this.readError(res));
+    }
+    return res.json();
+  }
+
   async getTx(txid: string): Promise<LightTxResponse> {
     if (!txid) {
       throw new Error("Txid is required");
     }
     const res = await this.fetchWithTimeout(`/api/wallet/tx/${txid}`);
+    if (!res.ok) {
+      throw new Error(await this.readError(res));
+    }
+    return res.json();
+  }
+
+  async broadcastSignedRawTx(rawTx: string): Promise<LightBroadcastResponse> {
+    if (!rawTx) {
+      throw new Error("Signed raw transaction is required");
+    }
+    const res = await this.fetchWithTimeout(`/api/wallet/broadcast`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ raw_tx: rawTx }),
+    });
     if (!res.ok) {
       throw new Error(await this.readError(res));
     }
