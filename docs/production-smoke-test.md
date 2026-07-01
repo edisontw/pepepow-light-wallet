@@ -117,7 +117,7 @@ git status --short
 export PATH="/home/ubuntu/node-dist/bin:$PATH"
 npm --prefix apps/web run test:client
 npm run build
-node apps/web/tests/readOnlyApiScan.mjs
+npm --prefix apps/web run scan:readonly-api
 sudo rsync -a --delete apps/web/dist/ /var/www/pepepow-light-wallet/
 ```
 
@@ -138,17 +138,17 @@ curl -i "https://light.pepepow.net/api/wallet/tx/<txid>"
 
 ## Legacy API scan
 
-Preferred scan:
+Preferred scan after `npm run build`:
 
 ```bash
-node apps/web/tests/readOnlyApiScan.mjs
+npm --prefix apps/web run scan:readonly-api
 ```
 
-Fallback scan:
+Fallback scan for built runtime only:
 
 ```bash
-grep -RIn "api.pepepow.net" apps/web/dist apps/web/src || true
-grep -RIn "/v1/\|/wallet/utxos\|/wallet/price\|/wallet/tx/broadcast" apps/web/dist apps/web/src || true
+grep -RIn "api.pepepow.net" apps/web/dist || true
+grep -RIn "/v1/\|/wallet/utxos\|/wallet/price\|/wallet/tx/broadcast" apps/web/dist || true
 ```
 
 Expected public wallet runtime should not call legacy wallet APIs.
