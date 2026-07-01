@@ -6,8 +6,8 @@ import { pepewLightClient } from "../lib/pepewLightClient";
 import AppLayout from "../components/layout/AppLayout";
 import PageCard from "../components/layout/PageCard";
 
-const INITIAL_HISTORY_LIMIT = 5;
-const SHOW_MORE_HISTORY_LIMIT = 25;
+const INITIAL_HISTORY_LIMIT = 10;
+const SHOW_MORE_STEP = 25;
 const HISTORY_FETCH_THROTTLE_MS = 15000;
 
 type FetchHealth = {
@@ -52,8 +52,27 @@ type TxDetailState = {
   data: any | null;
 };
 
+function txidOf(tx: any): string {
+  return String(tx?.txid ?? tx?.tx_hash ?? tx?.hash ?? tx?.id ?? "");
+}
+
+function heightOf(tx: any): number {
+  const raw = tx?.height ?? tx?.block_height ?? tx?.blockHeight ?? tx?.blockheight ?? tx?.confirmed_height ?? 0;
+  const height = Number(raw);
+  return Number.isFinite(height) ? height : 0;
+}
+
+function normalizeHistoryTx(tx: any) {
+  return {
+    ...tx,
+    txid: txidOf(tx),
+    height: heightOf(tx),
+    time: tx?.time ?? tx?.blocktime ?? tx?.timestamp ?? tx?.ts ?? tx?.date ?? null,
+  };
+}
+
 function parseHistoryPayload(payload: any) {
-  if (Array.isArray(payload)) return { txs: payload, source: "PEPEW Light API" };
+  if (Array.isArray(payload)) return { txs: payload.map(normalizeHistoryTx), source: "PEPEW Light API" };
   if (payload && typeof payload === "object") {
     let txs = Array.isArray(payload.txs)
       ? payload.txs
@@ -63,19 +82,15 @@ function parseHistoryPayload(payload: any) {
     if (!txs.length && (Array.isArray(payload.history) || Array.isArray(payload.mempool))) {
       const mempool = Array.isArray(payload.mempool) ? payload.mempool : [];
       const history = Array.isArray(payload.history) ? payload.history : [];
-      txs = [...mempool, ...history].map((tx: any) => ({
-        txid: tx.txid || tx.tx_hash || "",
-        height: Number(tx.height ?? 0),
-        time: tx.time || tx.blocktime || tx.timestamp || null,
-      }));
+      txs = [...mempool, ...history];
     }
-    return { ...payload, txs, source: payload.source || "PEPEW Light API" };
+    return { ...payload, txs: txs.map(normalizeHistoryTx), source: payload.source || "PEPEW Light API" };
   }
   return { txs: [], source: "PEPEW Light API" };
 }
 
-function createHistoryKey(address: string, limit: number) {
-  return `${limit}:${address}`;
+function createHistoryKey(address: string) {
+  return address;
 }
 
 function parseTxTimestampMs(tx: any): number | null {
@@ -117,16 +132,18 @@ function shortTxid(txid: string): string {
 }
 
 function formatHeightLabel(tx: any): string {
-  const height = Number(tx?.height ?? 0);
-  if (!Number.isFinite(height) || height <= 0) return "mempool";
+  const height = heightOf(tx);
+  if (height <= 0) return "mempool";
   return String(height);
 }
 
 function formatStatusLabel(tx: any): string {
-  const height = Number(tx?.height ?? 0);
-  if (!Number.isFinite(height)) return "Unknown";
-  if (height <= 0) return "Unconfirmed";
-  return "Confirmed";
+  const height = heightOf(tx);
+  const confirmations = Number(tx?.confirmations ?? tx?.confirmation_count ?? tx?.confirmed ?? NaN);
+  if (Number.isFinite(confirmations) && confirmations > 0) return `Confirmed · ${confirmations} confirmations`;
+  if (height > 0) return "Confirmed";
+  if (height < 0) return "Unconfirmed";
+  return "Unconfirmed";
 }
 
 function extractTxData(payload: any) {
@@ -166,7 +183,7 @@ export default function History() {
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [historyLimit, setHistoryLimit] = useState(INITIAL_HISTORY_LIMIT);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_HISTORY_LIMIT);
   const [reloadKey, setReloadKey] = useState(0);
   const [copiedTxid, setCopiedTxid] = useState<string | null>(null);
   const [txDetail, setTxDetail] = useState<TxDetailState | null>(null);
@@ -178,41 +195,27 @@ export default function History() {
   const txDetailCacheRef = useRef<Map<string, any>>(new Map());
   const forceNextFetchRef = useRef(false);
 
-  const fetchHistory = async (address: string, limit: number, force = false): Promise<HistoryFetchResult> => {
-    const key = createHistoryKey(address, limit);
+  const fetchHistory = async (address: string, force = false): Promise<HistoryFetchResult> => {
+    const key = createHistoryKey(address);
     const now = Date.now();
-
     const inFlight = historyInflightRef.current.get(key);
     if (inFlight) return inFlight;
 
     const cached = historyCacheRef.current.get(key);
-    if (!force && cached && now - cached.ts < HISTORY_FETCH_THROTTLE_MS) {
-      return cached.result;
-    }
+    if (!force && cached && now - cached.ts < HISTORY_FETCH_THROTTLE_MS) return cached.result;
 
     const promise = (async (): Promise<HistoryFetchResult> => {
       const startedAt = Date.now();
       try {
         const payload = await pepewLightClient.getHistory(address);
         const latencyMs = Date.now() - startedAt;
-        return {
-          ok: true,
-          status: 200,
-          latencyMs,
-          payload: parseHistoryPayload(payload),
-        };
+        return { ok: true, status: 200, latencyMs, payload: parseHistoryPayload(payload) };
       } catch (e: any) {
-        return {
-          ok: false,
-          status: null,
-          latencyMs: Date.now() - startedAt,
-          error: e?.message || t("errors.apiUnreachable"),
-        };
+        return { ok: false, status: null, latencyMs: Date.now() - startedAt, error: e?.message || t("errors.apiUnreachable") };
       }
     })();
 
     historyInflightRef.current.set(key, promise);
-
     try {
       const result = await promise;
       historyCacheRef.current.set(key, { ts: Date.now(), result });
@@ -224,25 +227,21 @@ export default function History() {
 
   useEffect(() => {
     let active = true;
-
     const run = async () => {
       if (!currentAddress) return;
-
       setLoading(true);
       setErr(null);
       const force = forceNextFetchRef.current;
       forceNextFetchRef.current = false;
 
       try {
-        const result = await fetchHistory(currentAddress, historyLimit, force);
+        const result = await fetchHistory(currentAddress, force);
         if (!active) return;
-
         if (!result.ok) {
           setErr(result.error || t("history.readFailed"));
           setHealth({ status: "fail", statusCode: result.status, latencyMs: result.latencyMs });
           return;
         }
-
         setData(result.payload);
         setHealth({ status: "ok", statusCode: result.status, latencyMs: result.latencyMs });
         setLastUpdatedAt(Date.now());
@@ -259,30 +258,23 @@ export default function History() {
     return () => {
       active = false;
     };
-  }, [currentAddress, historyLimit, reloadKey, t]);
+  }, [currentAddress, reloadKey, t]);
 
-  const txs = useMemo(() => {
-    const all = Array.isArray(data?.txs) ? data.txs : [];
-    return all.slice(0, historyLimit);
-  }, [data, historyLimit]);
+  const allTxs = useMemo(() => (Array.isArray(data?.txs) ? data.txs : []), [data]);
+  const txs = useMemo(() => allTxs.slice(0, visibleCount), [allTxs, visibleCount]);
 
-  const txViewModels = useMemo<TxSummaryViewModel[]>(() => {
-    return txs.map((tx: any, idx: number) => {
-      const txid = String(tx?.txid || tx?.tx_hash || "");
-      return {
-        key: txid || `tx-${idx}`,
-        txid,
-        timeLabel: formatTimeLabel(tx),
-        statusLabel: formatStatusLabel(tx),
-        heightLabel: formatHeightLabel(tx),
-      };
-    });
-  }, [txs]);
+  const txViewModels = useMemo<TxSummaryViewModel[]>(() => txs.map((tx: any, idx: number) => {
+    const txid = txidOf(tx);
+    return {
+      key: txid || `tx-${idx}`,
+      txid,
+      timeLabel: formatTimeLabel(tx),
+      statusLabel: formatStatusLabel(tx),
+      heightLabel: formatHeightLabel(tx),
+    };
+  }), [txs]);
 
-  const lastUpdatedLabel = lastUpdatedAt
-    ? new Date(lastUpdatedAt).toLocaleTimeString()
-    : "--";
-
+  const lastUpdatedLabel = lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleTimeString() : "--";
   const apiHealthLabel = health.status === "ok"
     ? `${t("history.debug.apiHealthOk")} (${health.latencyMs ?? "--"} ms)`
     : health.status === "fail"
@@ -328,27 +320,17 @@ export default function History() {
     setReloadKey((v) => v + 1);
   };
 
-  const handleShowMore = () => {
-    setHistoryLimit(SHOW_MORE_HISTORY_LIMIT);
-  };
-
   const activeDetailSummary = txDetail?.data ? summarizeTxDetail(txDetail.data) : null;
 
   return (
     <AppLayout>
       <PageCard title={t("history.title")}>
         {!currentAddress ? (
-          <div className="card">
-            <p>{t("history.emptyAddress")}</p>
-          </div>
+          <div className="card"><p>{t("history.emptyAddress")}</p></div>
         ) : err ? (
           <div className="card">
             <p className="error">{t("history.readFailed")}: {err}</p>
             <button className="btn secondary" onClick={handleRefresh}>{t("history.refresh")}</button>
-          </div>
-        ) : loading ? (
-          <div className="card">
-            <p>{t("history.loading")}</p>
           </div>
         ) : data ? (
           <div className="card">
@@ -356,19 +338,17 @@ export default function History() {
               <div>
                 <div className="section-title">{t("history.title")}</div>
                 <div className="muted" style={{ fontSize: "0.85rem", marginTop: 2 }}>
-                  Source: PEPEW Light API / ElectrumX Gateway
+                  Source: PEPEW Light API / ElectrumX Gateway · Showing {txs.length} of {allTxs.length}
                 </div>
               </div>
-              <button className="btn secondary" onClick={handleRefresh}>{t("history.refresh")}</button>
+              <button className="btn secondary" onClick={handleRefresh} disabled={loading}>{loading ? "Refreshing..." : t("history.refresh")}</button>
             </div>
 
             {data?.error && <div className="muted" style={{ marginBottom: 8 }}>{data.error}</div>}
             {!txs.length ? (
               <div>
-                <p>{t("history.emptyTxs")}</p>
-                <div className="row">
-                  <Link className="btn" to="/">{t("history.goReceive")}</Link>
-                </div>
+                <p>{loading ? t("history.loading") : t("history.emptyTxs")}</p>
+                <div className="row"><Link className="btn" to="/">{t("history.goReceive")}</Link></div>
               </div>
             ) : (
               <>
@@ -386,31 +366,17 @@ export default function History() {
                               <span className="muted" style={{ marginLeft: 8 }}>Height: </span>
                               <span>{tx.heightLabel}</span>
                             </div>
-                            <div className="tx-line">
-                              <span className="muted">{t("history.timeLabel")}: </span>
-                              <span>{tx.timeLabel}</span>
-                            </div>
-                            <div className="tx-line">
-                              <span className="muted">{t("history.txidLabel")}: </span>
-                              <code title={tx.txid}>{shortTxid(tx.txid)}</code>
-                            </div>
+                            <div className="tx-line"><span className="muted">{t("history.timeLabel")}: </span><span>{tx.timeLabel}</span></div>
+                            <div className="tx-line"><span className="muted">{t("history.txidLabel")}: </span><code title={tx.txid}>{shortTxid(tx.txid)}</code></div>
                           </div>
 
                           <div className="tx-actions">
                             <button className="btn ghost small" onClick={() => openTxDetail(tx.txid)} disabled={!tx.txid || txDetail?.loading}>
                               {isActiveDetail ? (txDetail?.loading ? "Loading..." : "Hide details") : "Details"}
                             </button>
-                            <button className="btn ghost small" onClick={() => copyTxid(tx.txid)} disabled={!tx.txid}>
-                              {copiedTxid === tx.txid ? t("copied") : t("copy")}
-                            </button>
+                            <button className="btn ghost small" onClick={() => copyTxid(tx.txid)} disabled={!tx.txid}>{copiedTxid === tx.txid ? t("copied") : t("copy")}</button>
                             {tx.txid && (
-                              <a
-                                href={`${EXPLORER_BASE_URL}/tx/${tx.txid}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="btn ghost small"
-                                title={t("viewInExplorer")}
-                              >
+                              <a href={`${EXPLORER_BASE_URL}/tx/${tx.txid}`} target="_blank" rel="noopener noreferrer" className="btn ghost small" title={t("viewInExplorer")}>
                                 {t("viewInExplorer")}
                               </a>
                             )}
@@ -422,9 +388,7 @@ export default function History() {
                             <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
                               <div>
                                 <div className="section-title">Transaction details</div>
-                                <div className="muted" style={{ wordBreak: "break-all", marginTop: 2 }}>
-                                  {tx.txid}
-                                </div>
+                                <div className="muted" style={{ wordBreak: "break-all", marginTop: 2 }}>{tx.txid}</div>
                               </div>
                               <button className="btn ghost small" onClick={() => setTxDetail(null)}>Close</button>
                             </div>
@@ -440,9 +404,7 @@ export default function History() {
                                   <div><span className="muted">Time: </span><strong>{detailSummary.time}</strong></div>
                                   <div><span className="muted">Confirmations: </span><strong>{detailSummary.confirmations}</strong></div>
                                 </div>
-                                <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 360, overflow: "auto" }}>
-                                  {detailSummary.preview}
-                                </pre>
+                                <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 360, overflow: "auto" }}>{detailSummary.preview}</pre>
                               </div>
                             ) : null}
                           </div>
@@ -452,20 +414,16 @@ export default function History() {
                   })}
                 </div>
 
-                {historyLimit === INITIAL_HISTORY_LIMIT && (Array.isArray(data?.txs) ? data.txs.length : 0) > INITIAL_HISTORY_LIMIT && (
+                {visibleCount < allTxs.length && (
                   <div className="row" style={{ marginTop: 10 }}>
-                    <button className="btn secondary" onClick={handleShowMore}>
-                      {t("history.showMore")}
-                    </button>
+                    <button className="btn secondary" onClick={() => setVisibleCount((v) => Math.min(v + SHOW_MORE_STEP, allTxs.length))}>{t("history.showMore")}</button>
                   </div>
                 )}
               </>
             )}
           </div>
         ) : (
-          <div className="card">
-            <p>{t("history.loading")}</p>
-          </div>
+          <div className="card"><p>{t("history.loading")}</p></div>
         )}
 
         {currentAddress && (
@@ -474,9 +432,7 @@ export default function History() {
             <div style={{ marginTop: 8 }}><strong>{t("history.debug.summaryTitle")}</strong></div>
             <div>{t("history.debug.lastUpdatedAt")}: <strong>{lastUpdatedLabel}</strong></div>
             <div>{t("history.debug.apiHealth")}: <strong>{apiHealthLabel}</strong></div>
-            {health.statusCode !== null && (
-              <div>{t("history.debug.status")}: <code>{health.statusCode}</code></div>
-            )}
+            {health.statusCode !== null && <div>{t("history.debug.status")}: <code>{health.statusCode}</code></div>}
           </details>
         )}
       </PageCard>
