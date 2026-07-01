@@ -130,14 +130,11 @@ export default function WalletHome() {
     <AppLayout>
       <PageCard title={t("title")}>
         <div className="card" style={{ border: "1px solid rgba(255, 170, 0, 0.45)", marginBottom: 12 }}>
-          <div className="section-title">Non-custodial wallet / 非託管網頁錢包</div>
+          <div className="section-title">Non-custodial wallet</div>
           <div className="muted" style={{ marginTop: 6, lineHeight: 1.55 }}>
             <div>Your mnemonic and private keys stay in your browser.</div>
             <div>PEPEW Light API only receives addresses for balance and history lookup.</div>
             <div>Never share or screenshot your mnemonic.</div>
-            <div style={{ marginTop: 6 }}>助記詞與私鑰只會保存在你的瀏覽器本機。</div>
-            <div>PEPEW Light API 只會接收地址，用於查詢餘額與交易紀錄。</div>
-            <div>請勿分享或截圖助記詞。</div>
           </div>
         </div>
 
