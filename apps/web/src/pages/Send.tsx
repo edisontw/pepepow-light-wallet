@@ -280,44 +280,53 @@ export default function Send() {
           </div>
         ) : (
           <>
-            <div className="card">
-              <div className="section-title">From</div>
-              <code style={{ wordBreak: "break-all" }}>{fromAddress}</code>
-              <div className="muted" style={{ marginTop: 8 }}>
-                {balanceLoading ? "Loading confirmed balance..." : balance ? `Confirmed balance: ${balance.confirmed_pepew} PEPEW` : balanceError || "Balance unavailable."}
+            <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <div className="section-title">Send PEPEW</div>
+                <p className="muted" style={{ marginTop: 8, marginBottom: 0 }}>
+                  Please verify the recipient address carefully. Blockchain transactions cannot be reversed.
+                </p>
               </div>
-            </div>
 
-            <div className="card">
-              <label className="field-label">Recipient address</label>
-              <input
-                className="input"
-                placeholder="P..."
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                disabled={busy}
-              />
-              {recentRecipients.length > 0 && (
-                <div style={{ marginTop: 10 }}>
-                  <div className="muted" style={{ marginBottom: 6 }}>Recent recipients</div>
-                  <div className="row" style={{ gap: 8 }}>
-                    {recentRecipients.map((item) => (
-                      <button
-                        key={item.address}
-                        className="btn ghost small"
-                        type="button"
-                        onClick={() => setTo(item.address)}
-                        disabled={busy}
-                        title={item.address}
-                      >
-                        {shortAddress(item.address)}
-                      </button>
-                    ))}
-                  </div>
+              <div>
+                <label className="field-label">From</label>
+                <code style={{ display: "block", wordBreak: "break-all", overflowWrap: "anywhere" }}>{fromAddress}</code>
+                <div className="muted" style={{ marginTop: 8 }}>
+                  {balanceLoading ? "Loading confirmed balance..." : balance ? `Confirmed balance: ${balance.confirmed_pepew} PEPEW` : balanceError || "Balance unavailable."}
                 </div>
-              )}
+              </div>
 
-              <div className="grid two" style={{ marginTop: 12 }}>
+              <div>
+                <label className="field-label">To</label>
+                <input
+                  className="input"
+                  placeholder="Recipient PEPEW address"
+                  value={to}
+                  onChange={(e) => setTo(e.target.value)}
+                  disabled={busy}
+                />
+                {recentRecipients.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <div className="muted" style={{ marginBottom: 6 }}>Recent recipients</div>
+                    <div className="row" style={{ gap: 8 }}>
+                      {recentRecipients.map((item) => (
+                        <button
+                          key={item.address}
+                          className="btn ghost small"
+                          type="button"
+                          onClick={() => setTo(item.address)}
+                          disabled={busy}
+                          title={item.address}
+                        >
+                          {shortAddress(item.address)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid two">
                 <div>
                   <label className="field-label">Amount</label>
                   <input
@@ -341,7 +350,8 @@ export default function Send() {
                   />
                 </div>
               </div>
-              <label className="row" style={{ marginTop: 12 }}>
+
+              <label className="row">
                 <input
                   type="checkbox"
                   checked={subtractFee}
@@ -350,29 +360,22 @@ export default function Send() {
                 />
                 <span>Subtract fee from amount</span>
               </label>
-            </div>
 
-            <div className="card">
-              <div className="section-title">Send</div>
-              <p className="muted" style={{ marginTop: 8 }}>
-                Please verify the recipient address carefully. Blockchain transactions cannot be reversed.
-              </p>
-              <p className="muted" style={{ marginTop: 6 }}>
-                請確認收款地址正確。區塊鏈交易送出後無法取消或追回。
-              </p>
-              {displayValidationError && <p className="error" style={{ marginTop: 10 }}>{displayValidationError}</p>}
-              {error && <p className="error" style={{ marginTop: 10 }}>{error}</p>}
+              {displayValidationError && <p className="error" style={{ margin: 0 }}>{displayValidationError}</p>}
+              {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
               {phase !== "idle" && phase !== "ready" && phase !== "broadcasted" && (
-                <p className="muted" style={{ marginTop: 10 }}>Status: {phase.replace(/_/g, " ")}</p>
+                <p className="muted" style={{ margin: 0 }}>Status: {phase.replace(/_/g, " ")}</p>
               )}
-              <button
-                className="btn"
-                onClick={handlePrimarySend}
-                disabled={busy || phase === "broadcasted"}
-                style={{ marginTop: 10 }}
-              >
-                {primaryButtonLabel}
-              </button>
+
+              <div>
+                <button
+                  className="btn"
+                  onClick={handlePrimarySend}
+                  disabled={busy || phase === "broadcasted"}
+                >
+                  {primaryButtonLabel}
+                </button>
+              </div>
             </div>
 
             <details className="details">
@@ -388,7 +391,7 @@ export default function Send() {
 
             {phase === "broadcasted" && (
               <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div className="section-title">Broadcast submitted</div>
+                <div className="section-title">✅ Broadcast submitted</div>
                 <p className="success" style={{ margin: 0 }}>Transaction was submitted to PEPEW Light API.</p>
                 {broadcastTxid && (
                   <div>
