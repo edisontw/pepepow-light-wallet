@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { buildAndSignP2PKH, PEPEPOW, selectUtxos, type UTXO, wifFromMnemonic } from "@pepepow/wallet-core";
 import AppLayout from "../components/layout/AppLayout";
 import PageCard from "../components/layout/PageCard";
-import { formatAtomicToPepew, parsePepewToAtomic, PEPEW_DECIMALS } from "../lib/amount";
+import { parsePepewToAtomic, PEPEW_DECIMALS } from "../lib/amount";
 import { pepewLightClient, LightAddressBalance, LightUtxo } from "../lib/pepewLightClient";
 
 const DEFAULT_PATH = "m/44'/5'/0'/0/0";
@@ -18,13 +18,6 @@ type SendPhase = "idle" | "loading_utxos" | "fetching_prevtx" | "signing" | "rea
 
 type SignedPreview = {
   rawTx: string;
-  txBytes: number;
-  selectedCount: number;
-  totalIn: bigint;
-  amount: bigint;
-  fee: bigint;
-  change: bigint;
-  totalSpent: bigint;
 };
 
 type RecentRecipient = {
@@ -125,8 +118,8 @@ export default function Send() {
   const [phase, setPhase] = useState<SendPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [signedPreview, setSignedPreview] = useState<SignedPreview | null>(null);
-  const [confirmedReview, setConfirmedReview] = useState(false);
   const [broadcastTxid, setBroadcastTxid] = useState<string | null>(null);
+  const [attemptedSend, setAttemptedSend] = useState(false);
 
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
   const amountAtomic = useMemo(() => parseAtomicInput(amount), [amount]);
@@ -158,6 +151,8 @@ export default function Send() {
     return null;
   }, [fromAddress, mnemonic, normalizedTo, amountAtomic, feeAtomic, recipientAmountAtomic, totalSpentAtomic, confirmedAtomic]);
 
+  const displayValidationError = attemptedSend ? validationError : null;
+
   useEffect(() => {
     if (!fromAddress) return;
     let active = true;
@@ -184,8 +179,8 @@ export default function Send() {
 
   useEffect(() => {
     setSignedPreview(null);
-    setConfirmedReview(false);
     setBroadcastTxid(null);
+    setError(null);
     if (phase !== "idle") setPhase("idle");
   }, [to, amount, fee, subtractFee]);
 
@@ -196,7 +191,6 @@ export default function Send() {
     }
     setError(null);
     setSignedPreview(null);
-    setConfirmedReview(false);
     setBroadcastTxid(null);
 
     try {
@@ -236,17 +230,7 @@ export default function Send() {
         changeAddress: fromAddress,
         fee: feeAtomic.toString(),
       });
-      const change = selected.total - recipientAmountAtomic - feeAtomic;
-      const preview = {
-        rawTx,
-        txBytes: rawTx.length / 2,
-        selectedCount: coreUtxos.length,
-        totalIn: selected.total,
-        amount: recipientAmountAtomic,
-        fee: feeAtomic,
-        change,
-        totalSpent: totalSpentAtomic,
-      };
+      const preview = { rawTx };
       setSignedPreview(preview);
       setPhase("ready");
       return preview;
@@ -266,7 +250,6 @@ export default function Send() {
       setBroadcastTxid(result.txid || null);
       setRecentRecipients(saveRecentRecipient(normalizedTo));
       setPhase("broadcasted");
-      setConfirmedReview(false);
     } catch (e: any) {
       setError(e?.message || "Broadcast failed.");
       setPhase("error");
@@ -274,15 +257,17 @@ export default function Send() {
   };
 
   const handlePrimarySend = async () => {
-    if (phase === "ready" && signedPreview && confirmedReview) {
-      await broadcast(signedPreview);
+    setAttemptedSend(true);
+    if (validationError) {
+      setError(null);
       return;
     }
-    await buildSignedTx();
+    const preview = await buildSignedTx();
+    if (preview) await broadcast(preview);
   };
 
   const busy = phase === "loading_utxos" || phase === "fetching_prevtx" || phase === "signing" || phase === "broadcasting";
-  const primaryButtonLabel = phase === "ready" ? "Confirm send" : phase === "broadcasting" ? "Broadcasting..." : "Send PEPEW";
+  const primaryButtonLabel = phase === "broadcasting" ? "Broadcasting..." : "Send PEPEW";
   const consolidationNeeded = balance && Number((balance as any).history_count || 0) > 50;
 
   return (
@@ -368,39 +353,22 @@ export default function Send() {
             </div>
 
             <div className="card">
-              <div className="section-title">Review</div>
-              <div style={{ marginTop: 8 }}><span className="muted">To: </span><code style={{ wordBreak: "break-all" }}>{normalizedTo || "--"}</code></div>
-              <div style={{ marginTop: 8 }}><span className="muted">Recipient receives: </span><strong>{recipientAmountAtomic && recipientAmountAtomic > 0n ? `${formatAtomicToPepew(recipientAmountAtomic)} PEPEW` : "--"}</strong></div>
-              <div style={{ marginTop: 8 }}><span className="muted">Network fee: </span><strong>{feeAtomic ? `${formatAtomicToPepew(feeAtomic)} PEPEW` : "--"}</strong></div>
-              <div style={{ marginTop: 8 }}><span className="muted">Total spent: </span><strong>{totalSpentAtomic ? `${formatAtomicToPepew(totalSpentAtomic)} PEPEW` : "--"}</strong></div>
-              {validationError && <p className="error" style={{ marginTop: 10 }}>{validationError}</p>}
+              <div className="section-title">Send</div>
+              <p className="muted" style={{ marginTop: 8 }}>
+                Please verify the recipient address carefully. Blockchain transactions cannot be reversed.
+              </p>
+              <p className="muted" style={{ marginTop: 6 }}>
+                請確認收款地址正確。區塊鏈交易送出後無法取消或追回。
+              </p>
+              {displayValidationError && <p className="error" style={{ marginTop: 10 }}>{displayValidationError}</p>}
               {error && <p className="error" style={{ marginTop: 10 }}>{error}</p>}
               {phase !== "idle" && phase !== "ready" && phase !== "broadcasted" && (
                 <p className="muted" style={{ marginTop: 10 }}>Status: {phase.replace(/_/g, " ")}</p>
               )}
-              {signedPreview && phase === "ready" && (
-                <div style={{ marginTop: 10 }}>
-                  <div className="grid two" style={{ marginTop: 8 }}>
-                    <div><span className="muted">Inputs: </span><strong>{signedPreview.selectedCount}</strong></div>
-                    <div><span className="muted">Size: </span><strong>{signedPreview.txBytes} bytes</strong></div>
-                    <div><span className="muted">Total input: </span><strong>{formatAtomicToPepew(signedPreview.totalIn)} PEPEW</strong></div>
-                    <div><span className="muted">Change: </span><strong>{formatAtomicToPepew(signedPreview.change)} PEPEW</strong></div>
-                  </div>
-                  <label className="row" style={{ marginTop: 10 }}>
-                    <input
-                      type="checkbox"
-                      checked={confirmedReview}
-                      onChange={(e) => setConfirmedReview(e.target.checked)}
-                      disabled={phase === "broadcasting" || phase === "broadcasted"}
-                    />
-                    <span>I reviewed recipient, amount, fee, and change.</span>
-                  </label>
-                </div>
-              )}
               <button
                 className="btn"
                 onClick={handlePrimarySend}
-                disabled={busy || Boolean(validationError) || (phase === "ready" && !confirmedReview)}
+                disabled={busy || phase === "broadcasted"}
                 style={{ marginTop: 10 }}
               >
                 {primaryButtonLabel}
@@ -419,11 +387,20 @@ export default function Send() {
             </details>
 
             {phase === "broadcasted" && (
-              <div className="card">
+              <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div className="section-title">Broadcast submitted</div>
-                <p className="success">Transaction was submitted to PEPEW Light API.</p>
-                {broadcastTxid && <div><span className="muted">TxID: </span><code style={{ wordBreak: "break-all" }}>{broadcastTxid}</code></div>}
-                <Link className="btn secondary" to="/history" style={{ marginTop: 10, textDecoration: "none" }}>View history</Link>
+                <p className="success" style={{ margin: 0 }}>Transaction was submitted to PEPEW Light API.</p>
+                {broadcastTxid && (
+                  <div>
+                    <span className="muted">TxID: </span>
+                    <code style={{ display: "inline-block", maxWidth: "100%", wordBreak: "break-all", overflowWrap: "anywhere", lineHeight: 1.4 }}>
+                      {broadcastTxid}
+                    </code>
+                  </div>
+                )}
+                <div>
+                  <Link className="btn secondary" to="/history" style={{ textDecoration: "none" }}>View history</Link>
+                </div>
               </div>
             )}
           </>
