@@ -1,241 +1,133 @@
-# Architecture: PEPEPOW Wallet Suite
-
-The **PEPEPOW Wallet Suite** is a modular, non-custodial wallet system designed for **Web**, **Telegram Mini App**, and **Telegram Bot** usage.
-
-The architecture strictly enforces **key sovereignty**, **minimal trust**, and **clear security boundaries** by separating blockchain read access, wallet coordination, and client-side key management.
-
----
-
-## Core Principles (Non-Negotiable)
-
-- **Mnemonic phrases and private keys exist only on the client**
-- The backend:
-  - never stores mnemonics
-  - never stores private keys
-  - never signs transactions
-- All transactions are **constructed and signed locally**
-- The backend only performs:
-  - blockchain reads
-  - fee estimation
-  - raw transaction broadcasting
-  - minimal public user bindings and caches
-
----
-
-## System Components
-
-The system is composed of four primary components:
-
----
-
-### 1. Web Wallet / Telegram Mini App (Client)
-
-**Role:**  
-Non-custodial wallet frontend (single shared codebase).
-
-**Tech Stack:**
-- React
-- Vite
-- Custom PEPEPOW wallet core (BIP-39 / BIP-44 derivation)
-
-**Responsibilities:**
-- Mnemonic generation and import
-- HD address derivation (BIP-44, coin type 5)
-- UTXO selection
-- Transaction construction
-- **Local transaction signing**
-- UI / UX rendering
-
-**Security Model:**
-- Private keys and mnemonics exist **only** in:
-  - browser memory
-  - localStorage (encrypted)
-  - optional Telegram Cloud Storage
-- No secret material is ever sent to the backend
-
----
+# PEPEW Light Wallet Architecture
 
-### 2. Wallet API (`wallet-api`, :9194)
+PEPEW Light Wallet is a client-side web wallet for PEPEPOW / PEPEW. The current public target is a static Vite/React wallet served from `/wallet/` and integrated with the PEPEW Light ElectrumX gateway.
 
-**Role:**  
-Authenticated wallet backend coordinator (control plane).  
-**This is not a wallet and not a custodian.**
+This repository is not the old `pepepow-wallet-suite`. It does not own trading bots, exchange automation, Telegram control-plane services, or the FastAPI gateway.
 
-**Tech Stack:**
-- Node.js (Express / Fastify)
-- JWT
-- SQLite / PostgreSQL (minimal state)
+## Design goals
 
-**Responsibilities:**
-- Verify Telegram WebApp `initData`
-- Issue short-lived JWTs
-- Provide wallet-specific backend services:
-  - fee estimation
-  - raw transaction broadcasting
-  - transaction / request caching
-  - Telegram user ↔ address binding
-  - payment request / claim flows
+- Keep the wallet non-custodial.
+- Keep all wallet secret handling in the browser/client.
+- Use PEPEW Light API for address, history, UTXO, transaction, and future signed-broadcast calls.
+- Keep ElectrumX and PEPEPOWd private behind the backend gateway.
+- Build a lightweight wallet suitable for an Oracle Cloud single-core / 6 GB host when served with the existing node, ElectrumX, API, and static files.
 
-**Typical Endpoints (examples):**
-- `POST /v1/profile/upsert`
-- `GET  /v1/resolve`
-- `POST /v1/requests`
-- `POST /v1/requests/:id/claim`
-- `GET  /v1/requests/:id`
-- `POST /v1/broadcast`
+## Runtime model
 
-**Security Model:**
-- Authenticated (Telegram identity)
-- Authorized (JWT)
-- Stateful only for **public or cache data**
-- **Never stores private keys or mnemonics**
-- **Never signs transactions**
+```text
+Browser
+  PEPEW Light Wallet
+    - import mnemonic
+    - derive addresses locally
+    - display balance, history, receive QR
+    - construct/sign transactions locally in future send flow
+    - submit only signed raw tx when broadcast is enabled
+        |
+        | HTTPS /api/wallet/*
+        v
+Nginx
+  - static /wallet/ files
+  - reverse proxy /api/*
+  - rate limiting and cache headers
+        |
+        v
+PEPEW Light API
+  FastAPI gateway from pepepow-electrumx-service
+        |
+        v
+ElectrumX on localhost
+        |
+        v
+PEPEPOWd
+```
 
----
+## Active components
 
-### 3. PEPEW API (`pepew-api`, :9193)
+### `apps/web`
 
-**Role:**  
-Public, read-only blockchain data service (indexer / query layer).
+Vite + React web wallet.
 
-**Tech Stack:**
-- Node.js (Fastify)
-- Connected to `pepepowd` via RPC / ZMQ / indexes
+Responsibilities:
 
-**Responsibilities:**
-- Provide efficient read access to blockchain data:
-  - chain height
-  - address balance
-  - UTXOs
-  - transaction history
-  - block / tx queries
-- Serve multiple consumers:
-  - Web Wallet
-  - Telegram Mini App
-  - Explorer
-  - third-party services
+- wallet onboarding UI
+- mnemonic import flow
+- balance display
+- transaction history display
+- receive address and QR display
+- PEPEW Light API status/error display
+- static build under `/wallet/`
 
-**Security Model:**
-- No user identity
-- No JWT
-- No database of users
-- **Read-only access**
-- No blockchain write capability
+### `packages/wallet-core`
 
-> Even if scanned or DoS-attacked, impact is limited to data queries only.
+Shared client-side wallet helpers.
 
----
+Responsibilities:
 
-### 4. PEPEPOWD (Core Node)
+- PEPEPOW address and derivation helpers
+- transaction construction/signing helpers when send flow is enabled
+- unit-testable wallet primitives
 
-**Role:**  
-Canonical source of truth for the PEPEPOW blockchain.
+This package must remain frontend/client-side wallet logic. Do not add backend service behavior here.
 
-**Responsibilities:**
-- Block validation
-- Transaction validation
-- Mempool management
-- JSON-RPC interface
-- ZMQ event streaming
+### `apps/web/src/lib/pepewLightClient.ts`
 
----
+PEPEW Light API client.
 
-## Why `wallet-api` and `pepew-api` Are Separate
+Current API paths:
 
-This separation is **intentional and required**, not historical.
+```text
+GET  /api/wallet/address/{address}
+GET  /api/wallet/history/{address}
+GET  /api/wallet/utxo/{address}
+GET  /api/wallet/tx/{txid}
+POST /api/wallet/broadcast
+```
 
-### 1. Security Boundary Enforcement
+Production defaults to same-origin calls. `VITE_PEPEW_LIGHT_API_BASE_URL` is only needed for local development or staging.
 
-- `pepew-api`: public, read-only, large attack surface, low risk
-- `wallet-api`: authenticated, write-capable (broadcast), high sensitivity
+## Repository boundaries
 
-Mixing them would:
-- expand the attack surface
-- complicate rate limiting and WAF rules
-- risk wallet availability under external traffic
+| Repository | Responsibility |
+| --- | --- |
+| `pepepow-light-wallet` | Static web wallet and client-side wallet logic |
+| `pepepow-electrumx-service` | FastAPI gateway, API cache, status pages, wallet read API, signed-tx broadcast endpoint |
+| `electrumx-pepepow` | ElectrumX chain support only |
 
----
+Do not mix backend mnemonic handling, private-key custody, or signing services into `pepepow-electrumx-service`.
 
-### 2. Clean Domain Separation
+## Data allowed to cross the API boundary
 
-- `pepew-api` = **blockchain domain API**
-- `wallet-api` = **wallet product domain API**
+Allowed:
 
-Keeping them separate:
-- avoids endpoint contamination
-- simplifies debugging
-- keeps blockchain infrastructure reusable
-- allows wallet features to evolve independently
-
----
-
-### 3. Scalability and Reuse
-
-With separation:
-- `pepew-api` can serve explorers, wallets, and third-party apps
-- `wallet-api` evolves for product needs:
-  - Telegram tipping
-  - request / claim flows
-  - anti-abuse logic
-  - caching and session policies
-
----
-
-## Data Flow (Simplified)
-
-```mermaid
-graph TD
-    User([User]) <--> WebApp[Web Wallet / Mini App]
-
-    WebApp -- "1. Balance / UTXO / Fee" --> WalletAPI[wallet-api :9194]
-    WalletAPI -- "2. Read Proxy" --> PepewAPI[pepew-api :9193]
-    PepewAPI -- "3. Query Index" --> Node[(PEPEPOWD)]
-
-    WebApp -- "4. Build & Sign Tx (Local)" --> WebApp
-
-    WebApp -- "5. Broadcast rawTx" --> WalletAPI
-    WalletAPI -- "6. sendrawtransaction" --> Node
-````
-
----
-
-## Backend Data Storage Policy
-
-**Forbidden:**
-
-* private keys
-* mnemonic phrases
-* signing material
-* any data that can reconstruct keys
-
-**Allowed (minimal):**
-
-* Telegram user metadata
-* user ↔ address bindings (public)
-* transaction / request caches
-
----
-
-## Deployment Model
-
-* `pepew-api` → `127.0.0.1:9193`
-* `wallet-api` → `127.0.0.1:9194`
-* `nginx` → public HTTPS entry point
-
-**Design Choice:**
-
-* No Docker by default
-* Direct Linux deployment
-* Local loopback or UNIX socket communication
-* Reduced overhead and simpler observability
-
----
-
-## Non-Custodial Guarantee
-
-The non-custodial nature of PEPEPOW Wallet Suite is guaranteed by design:
-
-* Keys never leave the client
-* Transactions are signed client-side
-* Backend only accepts **already-signed raw transactions**
-* Backend cannot control or reconstruct user funds
+- public address
+- txid
+- read query parameters
+- signed raw transaction after send flow is reviewed
+
+Not allowed:
+
+- mnemonic
+- seed phrase
+- private key
+- unsigned signing material that enables fund control
+- persistent address/IP identity tracking beyond operational logs
+
+## Build and deploy flow
+
+```bash
+npm install
+npm run build
+```
+
+Deploy `apps/web/dist` to the PEPEW Light host and serve it under `/wallet/`. Nginx should provide SPA fallback for wallet routes while keeping `/api/*` proxied to FastAPI.
+
+## Current phase checklist
+
+- `/wallet/` opens quickly.
+- Logo and static assets load from the correct `/wallet/` base path.
+- Wallet can import mnemonic locally.
+- Wallet shows non-custodial warning before or during import.
+- Wallet can show balance and history from PEPEW Light API.
+- Receive address and QR display correctly.
+- API errors are user-facing and do not expose internals.
+- Broadcast remains signed-raw-transaction only.
