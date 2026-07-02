@@ -43,6 +43,10 @@ function parseAtomicInput(value: string) {
   }
 }
 
+function atomicFromUtxoValue(value: number) {
+  return BigInt(Math.max(0, Math.trunc(Number(value))));
+}
+
 function shortAddress(value: string) {
   if (!value) return "--";
   if (value.length <= 18) return value;
@@ -120,6 +124,8 @@ export default function Send() {
   const [signedPreview, setSignedPreview] = useState<SignedPreview | null>(null);
   const [broadcastTxid, setBroadcastTxid] = useState<string | null>(null);
   const [attemptedSend, setAttemptedSend] = useState(false);
+  const [consolidationError, setConsolidationError] = useState<string | null>(null);
+  const [consolidationStatus, setConsolidationStatus] = useState<string | null>(null);
 
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
   const amountAtomic = useMemo(() => parseAtomicInput(amount), [amount]);
@@ -266,6 +272,69 @@ export default function Send() {
     if (preview) await broadcast(preview);
   };
 
+  const handleConsolidate = async () => {
+    const consolidateFeeAtomic = parseAtomicInput(DEFAULT_FEE);
+    if (!fromAddress || !mnemonic || !consolidateFeeAtomic) {
+      setConsolidationError("Import a wallet before consolidating UTXOs.");
+      return;
+    }
+    setConsolidationError(null);
+    setConsolidationStatus(null);
+    setBroadcastTxid(null);
+
+    try {
+      setPhase("loading_utxos");
+      const utxoResult = await pepewLightClient.getUtxo(fromAddress);
+      const spendable = utxoResult.utxos
+        .filter((u) => Number(u.height) > 0 && Number(u.value) > 0)
+        .sort((a, b) => Number(a.value) - Number(b.value));
+
+      if (spendable.length < 2) {
+        throw new Error("No consolidation needed. Fewer than 2 confirmed UTXOs are available.");
+      }
+
+      const selectedLight = spendable.slice(0, MAX_INPUTS);
+      const totalIn = selectedLight.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
+      const consolidateAmount = totalIn - consolidateFeeAtomic;
+      if (consolidateAmount <= DUST_ATOMIC) {
+        throw new Error("Selected UTXOs are too small after the network fee.");
+      }
+
+      setConsolidationStatus(`Preparing ${selectedLight.length} UTXOs...`);
+      setPhase("fetching_prevtx");
+      const coreUtxos: UTXO[] = [];
+      for (const item of selectedLight) {
+        const tx = await pepewLightClient.getTx(item.txid, true);
+        const rawTx = extractRawTx(tx);
+        if (!rawTx) throw new Error(`Previous transaction raw hex unavailable for ${item.txid}.`);
+        coreUtxos.push(toWalletCoreUtxo(item, rawTx));
+      }
+
+      setConsolidationStatus("Signing consolidation transaction...");
+      setPhase("signing");
+      const wif = await wifFromMnemonic(mnemonic, DEFAULT_PATH, PEPEPOW);
+      const rawTx = buildAndSignP2PKH({
+        network: PEPEPOW,
+        utxos: coreUtxos,
+        wif,
+        to: fromAddress,
+        amount: consolidateAmount.toString(),
+        changeAddress: fromAddress,
+        fee: consolidateFeeAtomic.toString(),
+      });
+
+      setConsolidationStatus("Broadcasting consolidation transaction...");
+      setPhase("broadcasting");
+      const result = await pepewLightClient.broadcastSignedRawTx(rawTx);
+      setBroadcastTxid(result.txid || null);
+      setConsolidationStatus(`Consolidation submitted with ${selectedLight.length} inputs.`);
+      setPhase("broadcasted");
+    } catch (e: any) {
+      setConsolidationError(e?.message || "UTXO consolidation failed.");
+      setPhase("error");
+    }
+  };
+
   const busy = phase === "loading_utxos" || phase === "fetching_prevtx" || phase === "signing" || phase === "broadcasting";
   const primaryButtonLabel = phase === "broadcasting" ? "Broadcasting..." : "Send PEPEW";
   const consolidationNeeded = balance && Number((balance as any).history_count || 0) > 50;
@@ -379,14 +448,25 @@ export default function Send() {
             </div>
 
             <details className="details">
-              <summary>Advanced: UTXO consolidation assessment</summary>
+              <summary>Advanced: Consolidate UTXOs</summary>
               <div style={{ marginTop: 8 }} className="muted">
-                Consolidation can combine many small confirmed UTXOs into one output to your own current wallet address. It is optional, spends a transaction fee, and should remain a manual action.
+                Consolidation sends up to {MAX_INPUTS} confirmed small UTXOs back to your own current wallet address. It is optional and spends a {DEFAULT_FEE} PEPEW network fee.
               </div>
               <div style={{ marginTop: 8 }}>
-                Current send input limit: <strong>{MAX_INPUTS}</strong>. If a send needs more inputs, split the payment or consolidate UTXOs first.
+                Use this only when your wallet has many small UTXOs or a normal send reports too many inputs.
               </div>
-              {consolidationNeeded && <p className="muted">This wallet may benefit from consolidation later. Full consolidation broadcast is intentionally not automated.</p>}
+              {consolidationNeeded && <p className="muted">This wallet may benefit from consolidation.</p>}
+              {consolidationStatus && <p className="success" style={{ marginBottom: 0 }}>{consolidationStatus}</p>}
+              {consolidationError && <p className="error" style={{ marginBottom: 0 }}>{consolidationError}</p>}
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={handleConsolidate}
+                disabled={busy || phase === "broadcasted"}
+                style={{ marginTop: 10 }}
+              >
+                Consolidate UTXOs
+              </button>
             </details>
 
             {phase === "broadcasted" && (
