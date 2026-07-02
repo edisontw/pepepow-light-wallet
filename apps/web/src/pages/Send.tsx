@@ -10,7 +10,9 @@ import { pepewLightClient, LightAddressBalance, LightUtxo } from "../lib/pepewLi
 const DEFAULT_PATH = "m/44'/5'/0'/0/0";
 const DEFAULT_FEE = "0.0001";
 const DUST_ATOMIC = 546n;
-const MAX_INPUTS = 80;
+const MAX_INPUTS = 150;
+const CONSOLIDATION_INPUT_LIMIT = 150;
+const AUTO_CONSOLIDATION_ROUNDS = 3;
 const RECENT_RECIPIENTS_KEY = "pepew_recent_recipients";
 const MAX_RECENT_RECIPIENTS = 8;
 
@@ -126,6 +128,7 @@ export default function Send() {
   const [attemptedSend, setAttemptedSend] = useState(false);
   const [consolidationError, setConsolidationError] = useState<string | null>(null);
   const [consolidationStatus, setConsolidationStatus] = useState<string | null>(null);
+  const [consolidationTxids, setConsolidationTxids] = useState<string[]>([]);
 
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
   const amountAtomic = useMemo(() => parseAtomicInput(amount), [amount]);
@@ -198,6 +201,7 @@ export default function Send() {
     setError(null);
     setSignedPreview(null);
     setBroadcastTxid(null);
+    setConsolidationTxids([]);
 
     try {
       setPhase("loading_utxos");
@@ -254,6 +258,7 @@ export default function Send() {
     try {
       const result = await pepewLightClient.broadcastSignedRawTx(preview.rawTx);
       setBroadcastTxid(result.txid || null);
+      setConsolidationTxids([]);
       setRecentRecipients(saveRecentRecipient(normalizedTo));
       setPhase("broadcasted");
     } catch (e: any) {
@@ -272,7 +277,49 @@ export default function Send() {
     if (preview) await broadcast(preview);
   };
 
-  const handleConsolidate = async () => {
+  const signAndBroadcastConsolidationBatch = async (
+    selectedLight: LightUtxo[],
+    batchIndex: number,
+    batchTotal: number,
+    consolidateFeeAtomic: bigint,
+    wif: string,
+  ) => {
+    const totalIn = selectedLight.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
+    const consolidateAmount = totalIn - consolidateFeeAtomic;
+    if (consolidateAmount <= DUST_ATOMIC) {
+      throw new Error(`Batch ${batchIndex + 1} is too small after the network fee.`);
+    }
+
+    setConsolidationStatus(`Preparing batch ${batchIndex + 1}/${batchTotal} with ${selectedLight.length} inputs...`);
+    setPhase("fetching_prevtx");
+    const coreUtxos: UTXO[] = [];
+    for (const item of selectedLight) {
+      const tx = await pepewLightClient.getTx(item.txid, true);
+      const rawTx = extractRawTx(tx);
+      if (!rawTx) throw new Error(`Previous transaction raw hex unavailable for ${item.txid}.`);
+      coreUtxos.push(toWalletCoreUtxo(item, rawTx));
+    }
+
+    setConsolidationStatus(`Signing batch ${batchIndex + 1}/${batchTotal}...`);
+    setPhase("signing");
+    const rawTx = buildAndSignP2PKH({
+      network: PEPEPOW,
+      utxos: coreUtxos,
+      wif,
+      to: fromAddress,
+      amount: consolidateAmount.toString(),
+      changeAddress: fromAddress,
+      fee: consolidateFeeAtomic.toString(),
+    });
+
+    setConsolidationStatus(`Broadcasting batch ${batchIndex + 1}/${batchTotal}...`);
+    setPhase("broadcasting");
+    const result = await pepewLightClient.broadcastSignedRawTx(rawTx);
+    if (!result.txid) throw new Error(`Batch ${batchIndex + 1} was submitted but no txid was returned.`);
+    return result.txid;
+  };
+
+  const handleConsolidate = async (auto = false) => {
     const consolidateFeeAtomic = parseAtomicInput(DEFAULT_FEE);
     if (!fromAddress || !mnemonic || !consolidateFeeAtomic) {
       setConsolidationError("Import a wallet before consolidating UTXOs.");
@@ -281,9 +328,11 @@ export default function Send() {
     setConsolidationError(null);
     setConsolidationStatus(null);
     setBroadcastTxid(null);
+    setConsolidationTxids([]);
 
     try {
       setPhase("loading_utxos");
+      setConsolidationStatus("Loading confirmed UTXOs...");
       const utxoResult = await pepewLightClient.getUtxo(fromAddress);
       const spendable = utxoResult.utxos
         .filter((u) => Number(u.height) > 0 && Number(u.value) > 0)
@@ -293,41 +342,37 @@ export default function Send() {
         throw new Error("No consolidation needed. Fewer than 2 confirmed UTXOs are available.");
       }
 
-      const selectedLight = spendable.slice(0, MAX_INPUTS);
-      const totalIn = selectedLight.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
-      const consolidateAmount = totalIn - consolidateFeeAtomic;
-      if (consolidateAmount <= DUST_ATOMIC) {
-        throw new Error("Selected UTXOs are too small after the network fee.");
-      }
-
-      setConsolidationStatus(`Preparing ${selectedLight.length} UTXOs...`);
-      setPhase("fetching_prevtx");
-      const coreUtxos: UTXO[] = [];
-      for (const item of selectedLight) {
-        const tx = await pepewLightClient.getTx(item.txid, true);
-        const rawTx = extractRawTx(tx);
-        if (!rawTx) throw new Error(`Previous transaction raw hex unavailable for ${item.txid}.`);
-        coreUtxos.push(toWalletCoreUtxo(item, rawTx));
-      }
-
-      setConsolidationStatus("Signing consolidation transaction...");
-      setPhase("signing");
+      const batchLimit = CONSOLIDATION_INPUT_LIMIT;
+      const maxRounds = auto ? AUTO_CONSOLIDATION_ROUNDS : 1;
+      const batchTotal = Math.min(maxRounds, Math.ceil(spendable.length / batchLimit));
       const wif = await wifFromMnemonic(mnemonic, DEFAULT_PATH, PEPEPOW);
-      const rawTx = buildAndSignP2PKH({
-        network: PEPEPOW,
-        utxos: coreUtxos,
-        wif,
-        to: fromAddress,
-        amount: consolidateAmount.toString(),
-        changeAddress: fromAddress,
-        fee: consolidateFeeAtomic.toString(),
-      });
+      const submittedTxids: string[] = [];
 
-      setConsolidationStatus("Broadcasting consolidation transaction...");
-      setPhase("broadcasting");
-      const result = await pepewLightClient.broadcastSignedRawTx(rawTx);
-      setBroadcastTxid(result.txid || null);
-      setConsolidationStatus(`Consolidation submitted with ${selectedLight.length} inputs.`);
+      for (let batchIndex = 0; batchIndex < batchTotal; batchIndex += 1) {
+        const start = batchIndex * batchLimit;
+        const selectedLight = spendable.slice(start, start + batchLimit);
+        if (selectedLight.length < 2) break;
+        const txid = await signAndBroadcastConsolidationBatch(
+          selectedLight,
+          batchIndex,
+          batchTotal,
+          consolidateFeeAtomic,
+          wif,
+        );
+        submittedTxids.push(txid);
+        setConsolidationTxids([...submittedTxids]);
+      }
+
+      if (!submittedTxids.length) {
+        throw new Error("No consolidation transaction was created.");
+      }
+
+      setBroadcastTxid(submittedTxids[0]);
+      setConsolidationStatus(
+        submittedTxids.length === 1
+          ? `Consolidation submitted with ${Math.min(spendable.length, batchLimit)} inputs.`
+          : `Auto consolidation submitted ${submittedTxids.length} transactions, up to ${submittedTxids.length * batchLimit} inputs.`,
+      );
       setPhase("broadcasted");
     } catch (e: any) {
       setConsolidationError(e?.message || "UTXO consolidation failed.");
@@ -450,23 +495,45 @@ export default function Send() {
             <details className="details">
               <summary>Advanced: Consolidate UTXOs</summary>
               <div style={{ marginTop: 8 }} className="muted">
-                Consolidation sends up to {MAX_INPUTS} confirmed small UTXOs back to your own current wallet address. It is optional and spends a {DEFAULT_FEE} PEPEW network fee.
+                Manual consolidation sends up to {CONSOLIDATION_INPUT_LIMIT} confirmed small UTXOs back to your own current wallet address. Auto mode submits up to {AUTO_CONSOLIDATION_ROUNDS} independent batches.
               </div>
               <div style={{ marginTop: 8 }}>
-                Use this only when your wallet has many small UTXOs or a normal send reports too many inputs.
+                Use this only when your wallet has many small UTXOs or a normal send reports too many inputs. Each batch spends a {DEFAULT_FEE} PEPEW network fee.
               </div>
               {consolidationNeeded && <p className="muted">This wallet may benefit from consolidation.</p>}
               {consolidationStatus && <p className="success" style={{ marginBottom: 0 }}>{consolidationStatus}</p>}
               {consolidationError && <p className="error" style={{ marginBottom: 0 }}>{consolidationError}</p>}
-              <button
-                className="btn secondary"
-                type="button"
-                onClick={handleConsolidate}
-                disabled={busy || phase === "broadcasted"}
-                style={{ marginTop: 10 }}
-              >
-                Consolidate UTXOs
-              </button>
+              {consolidationTxids.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div className="muted" style={{ marginBottom: 6 }}>Submitted consolidation txids</div>
+                  {consolidationTxids.map((txid, index) => (
+                    <div key={txid} style={{ marginTop: 6 }}>
+                      <span className="muted">Batch {index + 1}: </span>
+                      <code style={{ display: "inline-block", maxWidth: "100%", wordBreak: "break-all", overflowWrap: "anywhere", lineHeight: 1.4 }}>
+                        {txid}
+                      </code>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  onClick={() => handleConsolidate(false)}
+                  disabled={busy || phase === "broadcasted"}
+                >
+                  Consolidate UTXOs
+                </button>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  onClick={() => handleConsolidate(true)}
+                  disabled={busy || phase === "broadcasted"}
+                >
+                  Auto consolidate up to 3 rounds
+                </button>
+              </div>
             </details>
 
             {phase === "broadcasted" && (
