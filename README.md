@@ -1,97 +1,144 @@
-# PEPEPOW (PEPEW) Wallet Suite
+# PEPEW Light Wallet
 
-A comprehensive, non-custodial wallet ecosystem for the PEPEPOW (PEPEW) blockchain. 
+Client-side, non-custodial web wallet for the PEPEPOW / PEPEW blockchain.
 
-## Features
+This repository contains the browser wallet UI and local wallet logic. It is intended to be deployed as a static Vite/React app and served with the PEPEW Light API gateway at `https://light.pepepow.net/wallet/`.
 
-- **Web Wallet**: Modern, responsive React/Vite-based web interface.
-- **Telegram Mini App**: Integrated wallet experience for Telegram users.
-- **Wallet API**: Backend service for fee estimation, transaction broadcasting, and user UX helpers.
-- **PEPEW API**: Indexer and chain data proxy for fast, read-only chain queries.
-- **Trading Bot Suite**: A powerful collection of services for automated trading (DCA, GRID, Market Making) on centralized exchanges.
+## Current focus
 
-## ⚠️ Critical Security Warning: Non-Custodial
+Phase 4.5 / Phase 5 development focuses on making the public ElectrumX-based web wallet safe and usable:
 
-This project is **non-custodial**. Mnemonics and private keys are **NEVER** sent to or stored on the server. They remain exclusively in the client's browser or Telegram environment.
+- fast `/wallet/` static loading
+- balance and history display through PEPEW Light API
+- receive address and QR display
+- mnemonic import UX polish
+- clear non-custodial safety warnings in English and Chinese
+- friendly API / address / network error handling
+- signed raw transaction broadcast only after the send flow is reviewed
 
-> [!WARNING]
-> **PHISHING ATTACK WARNING**: If you enter your mnemonic on a non-official website, your funds will be lost immediately. Always verify the domain name (`wallet.pepepow.org` or `wallet.pepepow.net`) and ensure you are using the official release.
+## Security boundary
+
+This project is non-custodial.
+
+- Mnemonics and private keys must stay in the browser/client only.
+- The server must never receive, store, log, derive, or sign with private keys.
+- Address lookup, history, UTXO, transaction lookup, and future broadcast use the PEPEW Light API.
+- Broadcast must submit only an already-signed raw transaction.
+- The API gateway is `pepepow-electrumx-service`; it must not contain mnemonic, private-key, or signing code.
+
+> Warning: any website that asks for a mnemonic can steal funds. Users must verify the official domain before importing a wallet.
 
 ## Architecture
 
-This project follows a client-side signing model:
+```text
+User Browser
+  └─ PEPEW Light Wallet (Vite / React)
+       ├─ mnemonic import / local derivation / local signing
+       ├─ balance, history, UTXO, tx lookup
+       └─ future signed raw tx broadcast
+            ↓ HTTPS same-origin
+Nginx / static wallet / reverse proxy
+            ↓
+PEPEW Light API (FastAPI, pepepow-electrumx-service)
+            ↓ private localhost only
+ElectrumX
+            ↓
+PEPEPOWd
+```
+
+Repository split:
+
+- `pepepow-light-wallet`: frontend wallet and client-side wallet logic only.
+- `pepepow-electrumx-service`: FastAPI gateway, cache, status pages, read-only wallet API, and future signed-tx broadcast endpoint.
+- `electrumx-pepepow`: ElectrumX chain support only.
+
+## Repository layout
 
 ```text
-[ Client (Web/Mini App) ] --(Auth/UX)--> [ Wallet API ]
-           |                                  |
-    (Sign Transaction)                (Broadcast Raw Tx)
-           |                                  |
-           v                                  v
-[   Local Browser    ]                [  pepepowd RPC   ]
-                                              |
-[     PEPEW API      ] <--(Indexed Data)-- [ Blockchain ]
+apps/web/                 Vite + React web wallet
+  src/                    UI, pages, services, wallet integration
+  src/lib/pepewLightClient.ts
+                          PEPEW Light API client
+packages/wallet-core/     PEPEPOW address / derivation / transaction helpers
+docs/                     Current wallet architecture, API integration, security, deployment notes
+ops/                      Optional operational scripts/tests
 ```
 
-1. **Client**: Generates mnemonics and signs transactions locally.
-2. **Wallet API**: Provides business logic, fee estimation, and broadcasts signed raw transactions.
-3. **PEPEW API**: High-performance indexer for checking balances, UTXOs, and history.
+Old `pepepow-wallet-suite` material such as trading bots, Telegram wallet control plane, and standalone `pepew-api` service documentation is intentionally not part of this repo's active scope.
 
-## Repository Structure
+## Requirements
 
-- `apps/web`: React-based web wallet.
-- `services/wallet-api`: Node.js backend for the wallet.
-- `packages/wallet-core`: Shared logic for coin operations (BIP39/32/44).
-- `pepew-api`: Chain indexer service.
-- `services/trade-api`: Backend for automated trading strategies.
-- `services/trade-bot`: Telegram bot for managing trading strategies.
-- `docs/`: Technical documentation and runbooks.
-- `scripts/`: Deployment and maintenance scripts.
+- Node.js 20 LTS or newer
+- npm
+- PEPEW Light API reachable at `https://light.pepepow.net`
 
-## Getting Started
-
-### Prerequisites
-
-- Node.js 20 LTS
-- `pepepowd` node with `txindex=1` and `addressindex=1` (requires `-reindex` if newly enabled).
-- PostgreSQL (optional, used for UX cache and Telegram identity).
-
-### Installation
+## Local development
 
 ```bash
-# Install dependencies for the workspace
+git clone https://github.com/edisontw/pepepow-light-wallet.git
+cd pepepow-light-wallet
 npm install
-
-# Build all packages
+npm --prefix packages/wallet-core install
+npm --prefix apps/web install
 npm run build
+npm --prefix apps/web run dev
 ```
 
-### Configuration
+The Vite dev server uses `apps/web/vite.config.ts` and serves the wallet under `/wallet/`.
 
-Copy `.env.example` to `.env` and fill in the required values. See [Environment Rules](docs/ENV_RULES.md) for details.
+## Configuration
 
-For frontend web client integration with the read-only PEPEW Light API (Gateway), set:
-`VITE_PEPEW_LIGHT_API_BASE_URL=https://light.pepepow.net`
-This base URL will enable fetching the wallet balance and history using the read-only ElectrumX APIs instead of calling the indexer API.
+Production defaults to same-origin API calls:
+
+```text
+/api/wallet/address/{address}
+/api/wallet/history/{address}
+/api/wallet/utxo/{address}
+/api/wallet/tx/{txid}
+/api/wallet/broadcast
+```
+
+For development against a different PEPEW Light API host, set:
 
 ```bash
-cp .env.example .env
+VITE_PEPEW_LIGHT_API_BASE_URL=https://light.pepepow.net
 ```
 
+Do not point the public wallet at legacy `api.pepepow.net` routes unless a compatibility layer has been explicitly reviewed.
+
+## Build and checks
+
+```bash
+npm run build
+npm --prefix apps/web run test:client
+npm --prefix apps/web run test:amount
+npm --prefix packages/wallet-core run test:uint64
+npm --prefix apps/web run scan:readonly-api
+```
+
+Important checks before deployment:
+
+- no mnemonic/private-key/signing data is sent to the API
+- static assets resolve correctly under `/wallet/`
+- balance and history load from PEPEW Light API
+- API unavailable / invalid address / timeout errors show user-friendly messages
+- non-custodial warning is visible before or during mnemonic import
+
+## Production deployment model
+
+Recommended deployment is static build output served by Nginx from the PEPEW Light host:
+
+```bash
+npm run build
+# deploy apps/web/dist to the web root mounted at /wallet/
+```
+
+The backend API should remain in `pepepow-electrumx-service`; do not add server-side signing or secret handling to this repository.
 
 ## Documentation
 
-- [Architecture Overview](docs/architecture.md)
-- [Security Statement](docs/security.md)
-- [Deployment Layout](docs/deploy_layout.md)
-- [API Reference](docs/pepew-api.md)
-- [Trading Suite Architecture](docs/TRADE_ARCHITECTURE.md)
-- [Trading Strategy Specifications](docs/TRADE_STRATEGIES_SPEC.md)
-- [Trade API Documentation](docs/trade-api.md)
-- [Trade Bot Documentation](docs/trade-bot.md)
-- [Trading Quick Start Guide](docs/TRADE_USER_QUICK_START.md)
-- [Nginx Hardening](docs/nginx-hardening-minimal.md)
-- [Publishing to GitHub](docs/publishing-to-github.md)
-
-## Development
-
-See [DEV_COMPASS.md](docs/DEV_COMPASS.md) for a guide to the codebase and internal dependencies.
+- [Architecture](docs/architecture.md)
+- [Security](docs/security.md)
+- [PEPEW Light API integration](docs/pepew-api.md)
+- [Deployment layout](docs/deploy_layout.md)
+- [Development compass](docs/DEV_COMPASS.md)
