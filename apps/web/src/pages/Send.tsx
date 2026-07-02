@@ -15,16 +15,25 @@ const CONSOLIDATION_INPUT_LIMIT = 150;
 const AUTO_CONSOLIDATION_ROUNDS = 3;
 const RECENT_RECIPIENTS_KEY = "pepew_recent_recipients";
 const MAX_RECENT_RECIPIENTS = 8;
+const SPENT_OUTPOINTS_KEY = "pepew_recent_spent_outpoints";
+const SPENT_OUTPOINT_TTL_MS = 10 * 60 * 1000;
+const MAX_RECENT_SPENT_OUTPOINTS = 2000;
 
 type SendPhase = "idle" | "loading_utxos" | "fetching_prevtx" | "signing" | "ready" | "broadcasting" | "broadcasted" | "error";
 
 type SignedPreview = {
   rawTx: string;
+  spentOutpoints: string[];
 };
 
 type RecentRecipient = {
   address: string;
   lastUsedAt: number;
+};
+
+type SpentOutpointRecord = {
+  key: string;
+  expiresAt: number;
 };
 
 function normalizeAddressInput(value: string) {
@@ -53,6 +62,48 @@ function shortAddress(value: string) {
   if (!value) return "--";
   if (value.length <= 18) return value;
   return `${value.slice(0, 10)}…${value.slice(-6)}`;
+}
+
+function outpointKey(utxo: Pick<LightUtxo, "txid" | "vout">) {
+  return `${utxo.txid}:${utxo.vout}`;
+}
+
+function loadRecentSpentOutpoints() {
+  try {
+    const now = Date.now();
+    const raw = localStorage.getItem(SPENT_OUTPOINTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return new Set<string>();
+    const valid = parsed
+      .filter((item) => typeof item?.key === "string" && Number(item.expiresAt || 0) > now)
+      .slice(0, MAX_RECENT_SPENT_OUTPOINTS);
+    localStorage.setItem(SPENT_OUTPOINTS_KEY, JSON.stringify(valid));
+    return new Set<string>(valid.map((item) => item.key));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function saveRecentSpentOutpoints(keys: string[]) {
+  try {
+    const now = Date.now();
+    const raw = localStorage.getItem(SPENT_OUTPOINTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const keySet = new Set(keys.filter(Boolean));
+    const kept: SpentOutpointRecord[] = Array.isArray(parsed)
+      ? parsed.filter((item) => typeof item?.key === "string" && Number(item.expiresAt || 0) > now && !keySet.has(item.key))
+      : [];
+    const added = [...keySet].map((key) => ({ key, expiresAt: now + SPENT_OUTPOINT_TTL_MS }));
+    const next = [...added, ...kept].slice(0, MAX_RECENT_SPENT_OUTPOINTS);
+    localStorage.setItem(SPENT_OUTPOINTS_KEY, JSON.stringify(next));
+    return new Set<string>(next.map((item) => item.key));
+  } catch {
+    return loadRecentSpentOutpoints();
+  }
+}
+
+function spendableConfirmedUtxos(utxos: LightUtxo[], excludedOutpoints: Set<string>) {
+  return utxos.filter((u) => Number(u.height) > 0 && Number(u.value) > 0 && !excludedOutpoints.has(outpointKey(u)));
 }
 
 function extractRawTx(payload: any): string | null {
@@ -129,6 +180,7 @@ export default function Send() {
   const [consolidationError, setConsolidationError] = useState<string | null>(null);
   const [consolidationStatus, setConsolidationStatus] = useState<string | null>(null);
   const [consolidationTxids, setConsolidationTxids] = useState<string[]>([]);
+  const [spentOutpoints, setSpentOutpoints] = useState<Set<string>>(() => loadRecentSpentOutpoints());
 
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
   const amountAtomic = useMemo(() => parseAtomicInput(amount), [amount]);
@@ -161,6 +213,12 @@ export default function Send() {
   }, [fromAddress, mnemonic, normalizedTo, amountAtomic, feeAtomic, recipientAmountAtomic, totalSpentAtomic, confirmedAtomic]);
 
   const displayValidationError = attemptedSend ? validationError : null;
+
+  const markOutpointsSpent = (keys: string[]) => {
+    if (!keys.length) return;
+    const next = saveRecentSpentOutpoints(keys);
+    setSpentOutpoints(next);
+  };
 
   useEffect(() => {
     if (!fromAddress) return;
@@ -205,9 +263,11 @@ export default function Send() {
 
     try {
       setPhase("loading_utxos");
+      const latestSpent = loadRecentSpentOutpoints();
+      setSpentOutpoints(latestSpent);
       const utxoResult = await pepewLightClient.getUtxo(fromAddress);
-      const spendable = utxoResult.utxos.filter((u) => Number(u.height) > 0 && Number(u.value) > 0);
-      if (!spendable.length) throw new Error("No confirmed UTXOs available for sending.");
+      const spendable = spendableConfirmedUtxos(utxoResult.utxos, latestSpent);
+      if (!spendable.length) throw new Error("No confirmed UTXOs available for sending. Recent sends may still be propagating.");
 
       const selected = selectUtxos(
         spendable.map((u) => ({ txid: u.txid, vout: u.vout, value: String(u.value), nonWitnessUtxo: "00" })),
@@ -218,7 +278,8 @@ export default function Send() {
       }
 
       const selectedKeys = new Set(selected.picked.map((u) => `${u.txid}:${u.vout}`));
-      const selectedLight = spendable.filter((u) => selectedKeys.has(`${u.txid}:${u.vout}`));
+      const selectedLight = spendable.filter((u) => selectedKeys.has(outpointKey(u)));
+      const selectedOutpoints = selectedLight.map(outpointKey);
 
       setPhase("fetching_prevtx");
       const coreUtxos: UTXO[] = [];
@@ -240,7 +301,7 @@ export default function Send() {
         changeAddress: fromAddress,
         fee: feeAtomic.toString(),
       });
-      const preview = { rawTx };
+      const preview = { rawTx, spentOutpoints: selectedOutpoints };
       setSignedPreview(preview);
       setPhase("ready");
       return preview;
@@ -257,6 +318,7 @@ export default function Send() {
     setPhase("broadcasting");
     try {
       const result = await pepewLightClient.broadcastSignedRawTx(preview.rawTx);
+      markOutpointsSpent(preview.spentOutpoints);
       setBroadcastTxid(result.txid || null);
       setConsolidationTxids([]);
       setRecentRecipients(saveRecentRecipient(normalizedTo));
@@ -287,6 +349,7 @@ export default function Send() {
     setConsolidationError(null);
     setError(null);
     setAttemptedSend(false);
+    setSpentOutpoints(loadRecentSpentOutpoints());
     setPhase("idle");
   };
 
@@ -329,7 +392,7 @@ export default function Send() {
     setPhase("broadcasting");
     const result = await pepewLightClient.broadcastSignedRawTx(rawTx);
     if (!result.txid) throw new Error(`Batch ${batchIndex + 1} was submitted but no txid was returned.`);
-    return result.txid;
+    return { txid: result.txid, spentOutpoints: selectedLight.map(outpointKey) };
   };
 
   const handleConsolidate = async (auto = false) => {
@@ -346,13 +409,14 @@ export default function Send() {
     try {
       setPhase("loading_utxos");
       setConsolidationStatus("Loading confirmed UTXOs...");
+      const latestSpent = loadRecentSpentOutpoints();
+      setSpentOutpoints(latestSpent);
       const utxoResult = await pepewLightClient.getUtxo(fromAddress);
-      const spendable = utxoResult.utxos
-        .filter((u) => Number(u.height) > 0 && Number(u.value) > 0)
+      const spendable = spendableConfirmedUtxos(utxoResult.utxos, latestSpent)
         .sort((a, b) => Number(a.value) - Number(b.value));
 
       if (spendable.length < 2) {
-        throw new Error("No consolidation needed. Fewer than 2 confirmed UTXOs are available.");
+        throw new Error("No consolidation needed. Fewer than 2 confirmed UTXOs are available after excluding recent sends.");
       }
 
       const batchLimit = CONSOLIDATION_INPUT_LIMIT;
@@ -365,14 +429,15 @@ export default function Send() {
         const start = batchIndex * batchLimit;
         const selectedLight = spendable.slice(start, start + batchLimit);
         if (selectedLight.length < 2) break;
-        const txid = await signAndBroadcastConsolidationBatch(
+        const result = await signAndBroadcastConsolidationBatch(
           selectedLight,
           batchIndex,
           batchTotal,
           consolidateFeeAtomic,
           wif,
         );
-        submittedTxids.push(txid);
+        markOutpointsSpent(result.spentOutpoints);
+        submittedTxids.push(result.txid);
         setConsolidationTxids([...submittedTxids]);
       }
 
@@ -422,6 +487,11 @@ export default function Send() {
                 <div className="muted" style={{ marginTop: 8 }}>
                   {balanceLoading ? "Loading confirmed balance..." : balance ? `Confirmed balance: ${balance.confirmed_pepew} PEPEW` : balanceError || "Balance unavailable."}
                 </div>
+                {spentOutpoints.size > 0 && (
+                  <div className="muted" style={{ marginTop: 6 }}>
+                    Excluding {spentOutpoints.size} recently spent UTXO{spentOutpoints.size === 1 ? "" : "s"} while the network updates.
+                  </div>
+                )}
               </div>
 
               <div>
