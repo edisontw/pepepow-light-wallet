@@ -71,7 +71,7 @@ function normalizeLightApiBase(value?: string) {
 
 function withCacheBuster(path: string) {
   const join = path.includes("?") ? "&" : "?";
-  return `${path}${join}_=${Date.now()}`;
+  return `${path}${join}fresh=1&_=${Date.now()}`;
 }
 
 function getRawErrorMessage(errJson: any) {
