@@ -269,6 +269,7 @@ export default function Send() {
       const confirmedBeforeExclusion = utxoResult.utxos.filter((u) => Number(u.height) > 0 && Number(u.value) > 0);
       const unconfirmedAvailable = utxoResult.utxos.some((u) => Number(u.height) <= 0 && Number(u.value) > 0);
       const spendable = spendableConfirmedUtxos(utxoResult.utxos, latestSpent);
+      const spendableTotal = spendable.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
 
       if (!spendable.length) {
         if (confirmedBeforeExclusion.length > 0) {
@@ -278,6 +279,9 @@ export default function Send() {
           throw new Error("Only unconfirmed change is currently available. For safety, normal Send uses confirmed UTXOs only. Please wait for confirmation before sending again.");
         }
         throw new Error("No confirmed UTXOs available for sending.");
+      }
+      if (spendableTotal < totalSpentAtomic) {
+        throw new Error("Insufficient confirmed funds after excluding recently spent UTXOs. Please wait for the previous send to confirm or reduce the amount.");
       }
 
       const selected = selectUtxos(
