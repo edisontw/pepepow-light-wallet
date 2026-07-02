@@ -277,6 +277,19 @@ export default function Send() {
     if (preview) await broadcast(preview);
   };
 
+  const handleSendAnother = () => {
+    setTo("");
+    setAmount("");
+    setSignedPreview(null);
+    setBroadcastTxid(null);
+    setConsolidationTxids([]);
+    setConsolidationStatus(null);
+    setConsolidationError(null);
+    setError(null);
+    setAttemptedSend(false);
+    setPhase("idle");
+  };
+
   const signAndBroadcastConsolidationBatch = async (
     selectedLight: LightUtxo[],
     batchIndex: number,
@@ -367,7 +380,7 @@ export default function Send() {
         throw new Error("No consolidation transaction was created.");
       }
 
-      setBroadcastTxid(submittedTxids[0]);
+      setBroadcastTxid(null);
       setConsolidationStatus(
         submittedTxids.length === 1
           ? `Consolidation submitted with ${Math.min(spendable.length, batchLimit)} inputs.`
@@ -383,6 +396,7 @@ export default function Send() {
   const busy = phase === "loading_utxos" || phase === "fetching_prevtx" || phase === "signing" || phase === "broadcasting";
   const primaryButtonLabel = phase === "broadcasting" ? "Broadcasting..." : "Send PEPEW";
   const consolidationNeeded = balance && Number((balance as any).history_count || 0) > 50;
+  const hasBroadcastResult = Boolean(broadcastTxid) || consolidationTxids.length > 0;
 
   return (
     <AppLayout>
@@ -481,14 +495,19 @@ export default function Send() {
                 <p className="muted" style={{ margin: 0 }}>Status: {phase.replace(/_/g, " ")}</p>
               )}
 
-              <div>
+              <div className="row" style={{ gap: 8 }}>
                 <button
                   className="btn"
                   onClick={handlePrimarySend}
-                  disabled={busy || phase === "broadcasted"}
+                  disabled={busy}
                 >
                   {primaryButtonLabel}
                 </button>
+                {hasBroadcastResult && (
+                  <button className="btn secondary" type="button" onClick={handleSendAnother} disabled={busy}>
+                    Clear for next send
+                  </button>
+                )}
               </div>
             </div>
 
@@ -521,7 +540,7 @@ export default function Send() {
                   className="btn secondary"
                   type="button"
                   onClick={() => handleConsolidate(false)}
-                  disabled={busy || phase === "broadcasted"}
+                  disabled={busy}
                 >
                   Consolidate UTXOs
                 </button>
@@ -529,14 +548,14 @@ export default function Send() {
                   className="btn secondary"
                   type="button"
                   onClick={() => handleConsolidate(true)}
-                  disabled={busy || phase === "broadcasted"}
+                  disabled={busy}
                 >
                   Auto consolidate up to 3 rounds
                 </button>
               </div>
             </details>
 
-            {phase === "broadcasted" && (
+            {hasBroadcastResult && (
               <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div className="section-title">✅ Broadcast submitted</div>
                 <p className="success" style={{ margin: 0 }}>Transaction was submitted to PEPEW Light API.</p>
@@ -548,8 +567,9 @@ export default function Send() {
                     </code>
                   </div>
                 )}
-                <div>
+                <div className="row" style={{ gap: 8 }}>
                   <Link className="btn secondary" to="/history" style={{ textDecoration: "none" }}>View history</Link>
+                  <button className="btn secondary" type="button" onClick={handleSendAnother} disabled={busy}>Clear for next send</button>
                 </div>
               </div>
             )}
