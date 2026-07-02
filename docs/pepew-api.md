@@ -1,228 +1,158 @@
-# pepew-api
+# PEPEW Light API Integration
 
-`pepew-api` is the public chain-read service for the PEPEPOW ecosystem. It sits in front of the core node and exposes a small HTTP interface for blockchain lookups that are safe to share publicly.
+The web wallet integrates with PEPEW Light API from `pepepow-electrumx-service`.
 
-It is designed for:
+This replaces the old `pepew-api` / `wallet-api` split from `pepepow-wallet-suite`. Current wallet reads should use `https://light.pepepow.net/api/wallet/*` or same-origin `/api/wallet/*` when served from `https://light.pepepow.net/wallet/`.
 
-- chain height and readiness checks
-- fee estimation
-- transaction lookup
-- address balance, UTXO, and history reads
-- raw transaction broadcast
+## Base URL
 
-It is not designed for:
+Production default:
 
-- Telegram authentication
-- user profile or address binding
-- payment requests
-- private key handling
-- wallet state management
-
-Those wallet-facing concerns belong to `wallet-api`.
-
-## Public Base URL
-
-- Public host: `https://api.pepepow.net`
-- Local service port: `http://127.0.0.1:9193`
-- Swagger UI: `https://api.pepepow.net/docs`
-
-## Public Routing Model
-
-`api.pepepow.net` is a path-split host.
-
-Some routes on the host belong to `pepew-api`, while others belong to `wallet-api`. This split is intentional and should remain stable so the web wallet and Telegram wallet keep working without changes.
-
-### Public `pepew-api` routes on `api.pepepow.net`
-
-- `GET /health`
-- `GET /healthz`
-- `GET /readyz`
-- `GET /docs`
-- `GET /v1/chain/height`
-- `GET /v1/fee/estimate`
-- `GET /v1/addr/:address/balance`
-- `GET /v1/addr/:address/utxos`
-- `GET /v1/addr/:address/txs`
-- `GET /v1/tx/:txid`
-- `POST /v1/tx/broadcast`
-- `GET /v1/mempool/info`
-
-### Public routes on the same host that belong to `wallet-api`
-
-- `POST /auth/telegram`
-- `POST /api/auth/telegram`
-- `/wallet/*`
-- `/api/*`
-- `/tg/*`
-- `GET /v1/whoami`
-- `POST /v1/profile/upsert`
-- `GET|POST /v1/address/default`
-- `GET /v1/resolve`
-- `POST /v1/requests`
-- `GET /v1/requests/:id`
-- `POST /v1/requests/:id/claim`
-- `POST /v1/history`
-- `GET /v1/price`
-- `GET /v1/tx/raw/:txid`
-
-Important: `POST /v1/history` on the public host is a `wallet-api` compatibility route. It is not the public entry point for `pepew-api`.
-
-## Endpoints Intentionally Not Public
-
-The following `pepew-api` capabilities remain local or internal-only:
-
-- `POST /v1/history`
-- `POST /v1/utxos`
-- `GET /v1/node/blockchaininfo`
-- `GET /v1/node/indexinfo`
-- `POST /v1/wallet/importaddress`
-- `GET /v1/wallet/listunspent`
-
-This keeps the public surface narrow and avoids exposing node-management or wallet-watch-only operations.
-
-## Endpoint Notes
-
-### Health and readiness
-
-- `GET /health` returns a basic health response and current block height when available.
-- `GET /healthz` is the public liveness endpoint.
-- `GET /readyz` verifies service dependencies and is the best endpoint for load balancers and operational monitoring.
-
-### Chain height
-
-- `GET /v1/chain/height` returns the current PEPEPOW block height.
-
-Example:
-
-```json
-{ "height": 4303307 }
+```text
+same-origin
 ```
 
-### Fee estimate
+Optional development override:
 
-- `GET /v1/fee/estimate` returns a fee rate estimate for wallet send flows.
-- If the node cannot provide a fresh smart-fee estimate, a fallback value may be returned.
+```bash
+VITE_PEPEW_LIGHT_API_BASE_URL=https://light.pepepow.net
+```
 
-### Address reads
+The frontend client normalizes this value and defaults to same-origin when unset.
 
-- `GET /v1/addr/:address/balance` returns the balance for one address.
-- `GET /v1/addr/:address/utxos` returns spendable outputs for one address.
-- `GET /v1/addr/:address/txs` returns recent address history.
+## Wallet endpoints
 
-These routes are the public read-chain contract expected by the wallet architecture.
-
-### Transaction lookup and broadcast
-
-- `GET /v1/tx/:txid` returns a verbose transaction view.
-- `POST /v1/tx/broadcast` submits a signed raw transaction to the network.
-
-Broadcast requests must already be fully signed by the client. `pepew-api` does not sign transactions.
-
-### Mempool status
-
-- `GET /v1/mempool/info` returns basic mempool information from the connected node.
-
-## Authentication
-
-`pepew-api` is intended to be a public read service.
-
-- If no API key is configured, public routes can be called without credentials.
-- If an API key is configured, callers must send:
+### Address summary
 
 ```http
-x-api-key: <api-key>
+GET /api/wallet/address/{address}
 ```
 
-This protection applies to the service routes themselves, including `/docs`.
+Purpose:
 
-## Rate Limiting
+- validate address
+- return confirmed/unconfirmed balance
+- return a compact recent history list
 
-Public traffic is rate limited to protect the node and keep wallet traffic stable.
+Expected fields include:
 
-General behavior:
+```json
+{
+  "address": "P...",
+  "balance": {
+    "confirmed": 0,
+    "unconfirmed": 0,
+    "confirmed_pepew": "0",
+    "unconfirmed_pepew": "0"
+  },
+  "history": [],
+  "source": "electrumx",
+  "read_only": true
+}
+```
 
-- a default global rate limit applies to the service
-- stricter route-level limits apply to heavier or more sensitive operations
+### Address history
 
-Typical stricter routes include:
+```http
+GET /api/wallet/history/{address}?limit=50&offset=0
+```
 
-- `GET /v1/fee/estimate`
-- `POST /v1/tx/broadcast`
+Purpose:
 
-If a limit is exceeded, the service returns `429 Too Many Requests`.
+- return confirmed history
+- return mempool entries when available
 
-## CORS
+### UTXO lookup
 
-The service is CORS-enabled for approved wallet frontends.
+```http
+GET /api/wallet/utxo/{address}
+```
 
-Allowed origins are intended for the official web wallet and related public properties. Third-party integrations should not assume broad wildcard CORS access.
+Purpose:
 
-## Relationship With `wallet-api`
+- return spendable outputs for future send flow
+- keep UTXO selection in client-side wallet logic
 
-The two services serve different roles:
+### Transaction lookup
 
-- `pepew-api` is the public blockchain read layer
-- `wallet-api` is the wallet control plane for Telegram auth, wallet bindings, payment requests, and broadcast-related compatibility routes
+```http
+GET /api/wallet/tx/{txid}
+GET /api/wallet/tx/{txid}?raw=1
+```
 
-The web wallet and Telegram wallet do not rely on direct access to every `pepew-api` route. They intentionally keep using `wallet-api` for wallet-domain flows such as:
+Purpose:
 
-- authentication
-- payment requests
-- default address management
-- compatibility history batching on `/v1/history`
-- wallet-specific read proxies under `/wallet/*`
+- inspect transaction details
+- optionally fetch raw transaction data
 
-## Operational Notes
+### Broadcast
 
-- Public health checks for `pepew-api` use `/healthz` and `/readyz` on `api.pepepow.net`.
-- Wallet-specific health checks use `/wallet/healthz` and `/wallet/readyz`.
-- If `GET /v1/chain/height` or `GET /docs` returns `404` on the public host, the issue is usually Nginx path routing, not the `pepew-api` process itself.
-- Local service checks should use `http://127.0.0.1:9193`.
+```http
+POST /api/wallet/broadcast
+Content-Type: application/json
 
-## Example Requests
+{
+  "raw_tx": "<SIGNED_RAW_TX>"
+}
+```
 
-### Health
+Rules:
+
+- this endpoint may only receive signed raw transactions
+- the backend must not sign transactions
+- the frontend must display transaction details before signing and broadcast
+
+## Cache behavior
+
+The frontend can request fresh reads by appending:
+
+```text
+fresh=1
+```
+
+The API gateway owns actual cache TTLs. Typical production TTLs:
+
+- status: 5-10 seconds
+- balance: 10-20 seconds
+- history: 20-60 seconds
+- tx: 5-10 minutes
+
+## Error handling
+
+Frontend should map backend errors to friendly messages:
+
+| Condition | User-facing behavior |
+| --- | --- |
+| invalid address | ask user to check PEPEW address format |
+| timeout | ask user to retry |
+| rate limit | ask user to wait briefly |
+| ElectrumX unavailable | show API temporarily unavailable |
+| broadcast rejected | explain transaction may use stale UTXOs or be invalid |
+
+Backend error messages must not expose internal paths, credentials, process state, or raw upstream exception details.
+
+## Security contract
+
+Allowed request data:
+
+- address
+- txid
+- pagination/fresh query options
+- signed raw transaction
+
+Disallowed request data:
+
+- recovery phrase
+- private signing material
+- server-side wallet import payloads
+- persistent user identity binding for this public web wallet
+
+## Smoke tests
 
 ```bash
-curl -sS https://api.pepepow.net/healthz
-curl -sS https://api.pepepow.net/readyz
+curl -s https://light.pepepow.net/api/health
+curl -s https://light.pepepow.net/api/status
+curl -s https://light.pepepow.net/api/wallet/address/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb
+curl -s "https://light.pepepow.net/api/wallet/history/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb?limit=5&offset=0"
+curl -s https://light.pepepow.net/api/wallet/utxo/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb
 ```
-
-### Chain reads
-
-```bash
-curl -sS https://api.pepepow.net/v1/chain/height
-curl -sS https://api.pepepow.net/v1/fee/estimate
-curl -sS https://api.pepepow.net/v1/mempool/info
-```
-
-### Address reads
-
-```bash
-curl -sS https://api.pepepow.net/v1/addr/<ADDRESS>/balance
-curl -sS https://api.pepepow.net/v1/addr/<ADDRESS>/utxos
-curl -sS "https://api.pepepow.net/v1/addr/<ADDRESS>/txs?limit=20"
-```
-
-### Transaction lookup and broadcast
-
-```bash
-curl -sS https://api.pepepow.net/v1/tx/<TXID>
-curl -sS -X POST https://api.pepepow.net/v1/tx/broadcast \
-  -H 'Content-Type: application/json' \
-  -d '{"rawtx":"<SIGNED_RAW_TX>"}'
-```
-
-## Compatibility Notice
-
-Do not assume that every `/v1/*` route on `api.pepepow.net` belongs to `pepew-api`.
-
-In particular:
-
-- `/v1/history` is public `wallet-api`
-- `/v1/price` is public `wallet-api`
-- `/v1/address/default` is public `wallet-api`
-- `/v1/resolve` is public `wallet-api`
-- `/v1/requests*` is public `wallet-api`
-
-When documenting or integrating against the public host, always describe the path ownership explicitly.
