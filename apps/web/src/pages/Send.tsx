@@ -266,8 +266,19 @@ export default function Send() {
       const latestSpent = loadRecentSpentOutpoints();
       setSpentOutpoints(latestSpent);
       const utxoResult = await pepewLightClient.getUtxo(fromAddress);
+      const confirmedBeforeExclusion = utxoResult.utxos.filter((u) => Number(u.height) > 0 && Number(u.value) > 0);
+      const unconfirmedAvailable = utxoResult.utxos.some((u) => Number(u.height) <= 0 && Number(u.value) > 0);
       const spendable = spendableConfirmedUtxos(utxoResult.utxos, latestSpent);
-      if (!spendable.length) throw new Error("No confirmed UTXOs available for sending. Recent sends may still be propagating.");
+
+      if (!spendable.length) {
+        if (confirmedBeforeExclusion.length > 0) {
+          throw new Error("Previous send is still updating. The wallet is avoiding recently spent UTXOs; please wait for the next confirmed UTXO update before sending again.");
+        }
+        if (unconfirmedAvailable) {
+          throw new Error("Only unconfirmed change is currently available. For safety, normal Send uses confirmed UTXOs only. Please wait for confirmation before sending again.");
+        }
+        throw new Error("No confirmed UTXOs available for sending.");
+      }
 
       const selected = selectUtxos(
         spendable.map((u) => ({ txid: u.txid, vout: u.vout, value: String(u.value), nonWitnessUtxo: "00" })),
@@ -489,7 +500,7 @@ export default function Send() {
                 </div>
                 {spentOutpoints.size > 0 && (
                   <div className="muted" style={{ marginTop: 6 }}>
-                    Excluding {spentOutpoints.size} recently spent UTXO{spentOutpoints.size === 1 ? "" : "s"} while the network updates.
+                    Excluding {spentOutpoints.size} recently spent UTXO{spentOutpoints.size === 1 ? "" : "s"} while the network updates. Normal Send remains confirmed-only.
                   </div>
                 )}
               </div>
