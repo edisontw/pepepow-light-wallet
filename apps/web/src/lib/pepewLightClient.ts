@@ -69,6 +69,11 @@ function normalizeLightApiBase(value?: string) {
   return base;
 }
 
+function withCacheBuster(path: string) {
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}_=${Date.now()}`;
+}
+
 function getRawErrorMessage(errJson: any) {
   const error = errJson?.error;
   if (typeof error === "string") return error;
@@ -92,8 +97,8 @@ function mapLightApiError(raw: string, status?: number) {
   ) {
     return ADDRESS_ERROR_MESSAGE;
   }
-  if (text.includes("broadcast_rejected")) {
-    return "Transaction was rejected by the network.";
+  if (text.includes("broadcast_rejected") || text.includes("missing inputs") || text.includes("txn-mempool-conflict")) {
+    return "Transaction was rejected. The wallet may still be seeing stale UTXOs from a recent send; wait for the previous send to appear in history, then try again.";
   }
   if (text.includes("invalid_raw_tx") || text.includes("raw_tx_too")) {
     return "Signed transaction is invalid.";
@@ -134,7 +139,12 @@ export class PepewLightApiClient {
       const base = this.baseUrl.replace(/\/+$/, "");
       const url = `${base}${path.startsWith("/") ? path : `/${path}`}`;
       const res = await fetch(url, {
+        cache: "no-store",
         ...options,
+        headers: {
+          "Cache-Control": "no-cache",
+          ...(options.headers || {}),
+        },
         signal: controller.signal,
       });
       clearTimeout(timer);
@@ -163,7 +173,7 @@ export class PepewLightApiClient {
     if (!address) {
       throw new Error("Address is required");
     }
-    const res = await this.fetchWithTimeout(`/api/wallet/address/${address}`);
+    const res = await this.fetchWithTimeout(withCacheBuster(`/api/wallet/address/${address}`));
     if (!res.ok) {
       throw new Error(await this.readError(res));
     }
@@ -174,7 +184,7 @@ export class PepewLightApiClient {
     if (!address) {
       throw new Error("Address is required");
     }
-    const res = await this.fetchWithTimeout(`/api/wallet/history/${address}`);
+    const res = await this.fetchWithTimeout(withCacheBuster(`/api/wallet/history/${address}`));
     if (!res.ok) {
       throw new Error(await this.readError(res));
     }
@@ -185,7 +195,7 @@ export class PepewLightApiClient {
     if (!address) {
       throw new Error("Address is required");
     }
-    const res = await this.fetchWithTimeout(`/api/wallet/utxo/${address}`);
+    const res = await this.fetchWithTimeout(withCacheBuster(`/api/wallet/utxo/${address}`));
     if (!res.ok) {
       throw new Error(await this.readError(res));
     }
@@ -196,7 +206,7 @@ export class PepewLightApiClient {
     if (!txid) {
       throw new Error("Txid is required");
     }
-    const res = await this.fetchWithTimeout(`/api/wallet/tx/${txid}${raw ? "?raw=1" : ""}`);
+    const res = await this.fetchWithTimeout(withCacheBuster(`/api/wallet/tx/${txid}${raw ? "?raw=1" : ""}`));
     if (!res.ok) {
       throw new Error(await this.readError(res));
     }
