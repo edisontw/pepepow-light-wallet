@@ -1,6 +1,12 @@
 {
+  "private": true,
   "scripts": {
-    "build": "npm --prefix packages/wallet-core run build && npm --prefix services/wallet-api run build && npm --prefix services/trade-api run build && npm --prefix services/trade-bot run build && npm --prefix pepew-api/pepew-api run build && npm --prefix apps/web run build",
+    "build": "npm --prefix packages/wallet-core run build && npm --prefix apps/web run build",
+    "dev": "npm --prefix apps/web run dev",
+    "test:client": "npm --prefix apps/web run test:client",
+    "test:amount": "npm --prefix apps/web run test:amount",
+    "test:uint64": "npm --prefix packages/wallet-core run test:uint64",
+    "scan:readonly-api": "npm --prefix apps/web run scan:readonly-api",
     "test:ops": "bash ops/tests/pepepowd-reindex-monitor.test.sh"
   },
   "devDependencies": {
