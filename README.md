@@ -124,16 +124,40 @@ Important checks before deployment:
 - API unavailable / invalid address / timeout errors show user-friendly messages
 - non-custodial warning is visible before or during mnemonic import
 
-## Production deployment model
+## Production Deployment
 
-Recommended deployment is static build output served by Nginx from the PEPEW Light host:
+Production wallet:
 
-```bash
-npm run build
-# deploy apps/web/dist to the web root mounted at /wallet/
+https://light.pepepow.net/wallet/
+
+Production API:
+
+https://light.pepepow.net/api/wallet/*
+
+This wallet is deployed under `/wallet/`, so Vite must use:
+
+```ts
+base: '/wallet/'
 ```
 
-The backend API should remain in `pepepow-electrumx-service`; do not add server-side signing or secret handling to this repository.
+For production, the wallet should use same-origin API paths.
+For local development, set:
+
+```env
+VITE_PEPEW_LIGHT_API_BASE_URL=http://localhost:8000
+```
+
+## Non-custodial Security Notice
+
+PEPEW Light Wallet is non-custodial.
+Your mnemonic and private keys stay in your browser.
+Never share your recovery phrase with anyone.
+PEPEW Light API cannot recover your wallet.
+
+PEPEW Light Wallet 是非託管錢包。
+助記詞與私鑰只會保存在你的瀏覽器中。
+請勿將助記詞提供給任何人。
+PEPEW Light API 無法協助找回錢包。
 
 ## Documentation
 
