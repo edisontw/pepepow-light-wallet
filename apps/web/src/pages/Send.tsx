@@ -11,6 +11,7 @@ const DEFAULT_PATH = "m/44'/5'/0'/0/0";
 const DEFAULT_FEE = "0.0001";
 const DUST_ATOMIC = 546n;
 const MAX_INPUTS = 150;
+const PREV_TX_FETCH_CONCURRENCY = 6;
 const CONSOLIDATION_INPUT_LIMIT = 150;
 const AUTO_CONSOLIDATION_ROUNDS = 3;
 const RECENT_RECIPIENTS_KEY = "pepew_recent_recipients";
@@ -161,6 +162,28 @@ function toWalletCoreUtxo(utxo: LightUtxo, rawTx: string): UTXO {
     value: String(utxo.value),
     nonWitnessUtxo: rawTx,
   };
+}
+
+async function fetchCoreUtxosWithLimit(selectedLight: LightUtxo[]): Promise<UTXO[]> {
+  const results: UTXO[] = new Array(selectedLight.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < selectedLight.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      const item = selectedLight[index];
+      const tx = await pepewLightClient.getTx(item.txid, true);
+      const rawTx = extractRawTx(tx);
+      if (!rawTx) throw new Error(`Previous transaction raw hex unavailable for ${item.txid}.`);
+      results[index] = toWalletCoreUtxo(item, rawTx);
+    }
+  }
+
+  const workerCount = Math.min(PREV_TX_FETCH_CONCURRENCY, selectedLight.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
 
 function loadRecentRecipients(): RecentRecipient[] {
@@ -336,13 +359,7 @@ export default function Send() {
       const selectedOutpoints = selectedLight.map(outpointKey);
 
       setPhase("fetching_prevtx");
-      const coreUtxos: UTXO[] = [];
-      for (const item of selectedLight) {
-        const tx = await pepewLightClient.getTx(item.txid, true);
-        const rawTx = extractRawTx(tx);
-        if (!rawTx) throw new Error(`Previous transaction raw hex unavailable for ${item.txid}.`);
-        coreUtxos.push(toWalletCoreUtxo(item, rawTx));
-      }
+      const coreUtxos = await fetchCoreUtxosWithLimit(selectedLight);
 
       setPhase("signing");
       const wif = await wifFromMnemonic(mnemonic, DEFAULT_PATH, PEPEPOW);
@@ -435,13 +452,7 @@ export default function Send() {
 
     setConsolidationStatus(`Preparing batch ${batchIndex + 1}/${batchTotal} with ${selectedLight.length} inputs...`);
     setPhase("fetching_prevtx");
-    const coreUtxos: UTXO[] = [];
-    for (const item of selectedLight) {
-      const tx = await pepewLightClient.getTx(item.txid, true);
-      const rawTx = extractRawTx(tx);
-      if (!rawTx) throw new Error(`Previous transaction raw hex unavailable for ${item.txid}.`);
-      coreUtxos.push(toWalletCoreUtxo(item, rawTx));
-    }
+    const coreUtxos = await fetchCoreUtxosWithLimit(selectedLight);
 
     setConsolidationStatus(`Signing batch ${batchIndex + 1}/${batchTotal}...`);
     setPhase("signing");
