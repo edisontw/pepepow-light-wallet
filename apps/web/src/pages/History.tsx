@@ -131,19 +131,20 @@ function shortTxid(txid: string): string {
   return `${value.slice(0, 10)}…${value.slice(-6)}`;
 }
 
-function formatHeightLabel(tx: any): string {
+function formatHeightLabel(tx: any, t?: any): string {
   const height = heightOf(tx);
-  if (height <= 0) return "mempool";
+  if (height <= 0) return t ? t("wallet.history.unconfirmed") : "mempool";
   return String(height);
 }
 
-function formatStatusLabel(tx: any): string {
+function formatStatusLabel(tx: any, t: any): string {
   const height = heightOf(tx);
   const confirmations = Number(tx?.confirmations ?? tx?.confirmation_count ?? tx?.confirmed ?? NaN);
-  if (Number.isFinite(confirmations) && confirmations > 0) return `Confirmed · ${confirmations} confirmations`;
-  if (height > 0) return "Confirmed";
-  if (height < 0) return "Unconfirmed";
-  return "Unconfirmed";
+  if (Number.isFinite(confirmations) && confirmations > 0) {
+    return `${t("wallet.history.confirmed")} · ${confirmations} ${t("history.confirmations")}`;
+  }
+  if (height > 0) return t("wallet.history.confirmed");
+  return t("wallet.history.unconfirmed");
 }
 
 function extractTxData(payload: any) {
@@ -269,10 +270,10 @@ export default function History() {
       key: txid || `tx-${idx}`,
       txid,
       timeLabel: formatTimeLabel(tx),
-      statusLabel: formatStatusLabel(tx),
-      heightLabel: formatHeightLabel(tx),
+      statusLabel: formatStatusLabel(tx, t),
+      heightLabel: formatHeightLabel(tx, t),
     };
-  }), [txs]);
+  }), [txs, t]);
 
   const lastUpdatedLabel = lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleTimeString() : "--";
   const apiHealthLabel = health.status === "ok"
@@ -338,10 +339,10 @@ export default function History() {
               <div>
                 <div className="section-title">{t("history.title")}</div>
                 <div className="muted" style={{ fontSize: "0.85rem", marginTop: 2 }}>
-                  Source: PEPEW Light API / ElectrumX Gateway · Showing {txs.length} of {allTxs.length}
+                  {t("wallet.history.sourceInfo", { showing: txs.length, total: allTxs.length })}
                 </div>
               </div>
-              <button className="btn secondary" onClick={handleRefresh} disabled={loading}>{loading ? "Refreshing..." : t("history.refresh")}</button>
+              <button className="btn secondary" onClick={handleRefresh} disabled={loading}>{loading ? t("loading") : t("history.refresh")}</button>
             </div>
 
             {data?.error && <div className="muted" style={{ marginBottom: 8 }}>{data.error}</div>}
@@ -377,7 +378,7 @@ export default function History() {
 
                           <div className="tx-actions">
                             <button className="btn ghost small" onClick={() => openTxDetail(tx.txid)} disabled={!tx.txid || txDetail?.loading}>
-                              {isActiveDetail ? (txDetail?.loading ? "Loading..." : "Hide details") : "Details"}
+                              {isActiveDetail ? (txDetail?.loading ? t("loading") : t("hide")) : t("wallet.history.openTx")}
                             </button>
                             <button className="btn ghost small" onClick={() => copyTxid(tx.txid)} disabled={!tx.txid}>{copiedTxid === tx.txid ? t("copied") : t("copy")}</button>
                             {tx.txid && (
@@ -392,22 +393,22 @@ export default function History() {
                           <div className="card" style={{ marginTop: 8, marginBottom: 8 }}>
                             <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
                               <div>
-                                <div className="section-title">Transaction details</div>
+                                <div className="section-title">{t("history.detailTitle")}</div>
                                 <div className="muted" style={{ wordBreak: "break-all", marginTop: 2 }}>{tx.txid}</div>
                               </div>
-                              <button className="btn ghost small" onClick={() => setTxDetail(null)}>Close</button>
+                              <button className="btn ghost small" onClick={() => setTxDetail(null)}>{t("history.detailClose")}</button>
                             </div>
                             {txDetail.loading ? (
-                              <p className="muted">Loading transaction from PEPEW Light API...</p>
+                              <p className="muted">{t("history.detailLoading")}</p>
                             ) : txDetail.error ? (
                               <p className="error">{txDetail.error}</p>
                             ) : detailSummary ? (
                               <div>
                                 <div className="row" style={{ gap: 18, marginBottom: 8 }}>
-                                  <div><span className="muted">Type: </span><strong>{detailSummary.type}</strong></div>
-                                  <div><span className="muted">Size: </span><strong>{detailSummary.size}</strong></div>
-                                  <div><span className="muted">Time: </span><strong>{detailSummary.time}</strong></div>
-                                  <div><span className="muted">Confirmations: </span><strong>{detailSummary.confirmations}</strong></div>
+                                  <div><span className="muted">{t("history.detailDirectionLabel")}: </span><strong>{detailSummary.type}</strong></div>
+                                  <div><span className="muted">{t("history.sizeLabel", "Size")}: </span><strong>{detailSummary.size}</strong></div>
+                                  <div><span className="muted">{t("history.timeLabel")}: </span><strong>{detailSummary.time}</strong></div>
+                                  <div><span className="muted">{t("history.confirmations")}: </span><strong>{detailSummary.confirmations}</strong></div>
                                 </div>
                                 <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 360, overflow: "auto" }}>{detailSummary.preview}</pre>
                               </div>

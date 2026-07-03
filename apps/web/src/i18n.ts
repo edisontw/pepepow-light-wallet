@@ -266,8 +266,8 @@ const resources = {
         emptyTxs: "查無交易紀錄。",
         goReceive: "前往收款",
         goSend: "前往發送",
-        showMore: "Show more",
-        refresh: "Refresh",
+        showMore: "顯示更多",
+        refresh: "重新整理",
         debugTitle: "API 除錯資訊",
         errorLabel: "錯誤",
         loading: "讀取中...",
@@ -353,6 +353,77 @@ const resources = {
         title: "發生錯誤",
         description: "請重新整理頁面或稍後再試。",
         reload: "重新整理"
+      },
+      wallet: {
+        beta: {
+          title: "公開測試版",
+          description: "目前提供唯讀錢包功能。送出與廣播交易會在 signed transaction 流程完整驗證後才加入。",
+          readOnly: "公開測試期間暫停送出交易。目前錢包僅支援餘額與交易紀錄查詢。交易廣播功能會在 signed raw transaction 流程完整驗證後才加入。"
+        },
+        security: {
+          title: "非託管安全提示",
+          nonCustodial: "非託管錢包",
+          mnemonicLocal: "助記詞與私鑰只會保存在你的瀏覽器中。",
+          serverNeverReceives: "伺服器不會接收你的助記詞或私鑰。",
+          backupPhrase: "使用前請自行備份 recovery phrase。",
+          apiCannotRecover: "PEPEW Light API 無法協助找回錢包。",
+          neverShare: "請勿將 recovery phrase 提供給任何人。",
+          understandRisk: "我了解這是非託管錢包，並且我需要自行備份 recovery phrase。"
+        },
+        actions: {
+          createWallet: "建立錢包",
+          importWallet: "匯入錢包",
+          forgetWallet: "清除錢包",
+          forgetWalletConfirm: "確定要從此瀏覽器清除錢包嗎？請確保您已備份 recovery phrase！",
+          copyAddress: "複製地址",
+          refresh: "重新整理"
+        },
+        balance: {
+          title: "確認餘額",
+          updated: "更新時間",
+          apiStatus: "API 狀態",
+          loading: "正在讀取 PEPEW Light API 餘額...",
+          empty: "無法取得 PEPEW Light API 餘額。",
+          healthy: "連線正常",
+          unhealthy: "連線中斷"
+        },
+        history: {
+          title: "交易紀錄",
+          sizeLabel: "大小",
+          empty: "查無交易紀錄。",
+          loading: "讀取中...",
+          openTx: "查看詳情",
+          copyTxid: "複製 TxID",
+          confirmed: "已確認",
+          unconfirmed: "未確認",
+          sourceInfo: "來源：PEPEW Light API / ElectrumX Gateway · 顯示 {{showing}} / 共 {{total}} 筆"
+        },
+        send: {
+          title: "發送 PEPEW",
+          disabledBtn: "發送 PEPEW (測試版暫停)",
+          consolidateDisabledBtn: "整理 UTXO (測試版暫停)",
+          autoConsolidateDisabledBtn: "自動整理 (測試版暫停)",
+          createOrImportBeforeSending: "請先建立或匯入錢包再進行發送。",
+          verifyWarn: "請仔細確認收款地址。區塊鏈交易一旦發出即無法撤回。",
+          fromLabel: "來源",
+          toLabel: "收件人",
+          amountLabel: "金額",
+          feeLabel: "手續費",
+          subtractFee: "從金額中扣除手續費",
+          refreshUtxos: "重新整理 UTXO",
+          advancedConsolidate: "進階：整理 UTXO",
+          consolidateDescription: "手動整理將發送最多 80 筆已確認的小額 UTXO 回到你目前的錢包地址。自動模式將提交最多 5 個獨立批次。",
+          consolidateFeeDescription: "僅在錢包有許多小額 UTXO 或正常發送提示輸入過多時使用。每個批次消耗 100 PEPEW 網路手續費。",
+          benefitFromConsolidate: "此錢包可能會從 UTXO 整理中受益。",
+          loadingBalance: "讀取確認餘額中...",
+          confirmedBalance: "確認餘額",
+          recipientPlaceholder: "接收者 PEPEW 地址",
+          recentRecipients: "最近收件人"
+        },
+        footer: {
+          summary: "非託管錢包",
+          description: "助記詞與私鑰只會保留在此瀏覽器中。PEPEW Light 只接收地址查詢與已簽署交易廣播。請勿分享或截圖助記詞。"
+        }
       }
     }
   },
@@ -695,6 +766,77 @@ const resources = {
         title: "Something went wrong",
         description: "Please reload the page or try again later.",
         reload: "Reload"
+      },
+      wallet: {
+        beta: {
+          title: "Public Beta",
+          description: "Read-only wallet features are available. Sending and broadcasting will be added only after the signed transaction flow is fully verified.",
+          readOnly: "Sending is disabled during the public beta. This wallet currently supports balance and history lookup only. Broadcasting will only accept signed raw transactions after the flow is fully verified."
+        },
+        security: {
+          title: "Non-custodial Safety Warning",
+          nonCustodial: "Non-custodial wallet",
+          mnemonicLocal: "Your mnemonic and private keys stay in your browser.",
+          serverNeverReceives: "The server never receives your mnemonic or private keys.",
+          backupPhrase: "Back up your recovery phrase before using the wallet.",
+          apiCannotRecover: "PEPEW Light API cannot recover your wallet.",
+          neverShare: "Never share your recovery phrase with anyone.",
+          understandRisk: "I understand that this is a non-custodial wallet and I am responsible for backing up my recovery phrase."
+        },
+        actions: {
+          createWallet: "Create Wallet",
+          importWallet: "Import Wallet",
+          forgetWallet: "Forget Wallet",
+          forgetWalletConfirm: "Are you sure you want to clear the wallet from this browser? Make sure you have backed up your recovery phrase!",
+          copyAddress: "Copy Address",
+          refresh: "Refresh"
+        },
+        balance: {
+          title: "Confirmed Balance",
+          updated: "Updated",
+          apiStatus: "API Status",
+          loading: "Loading PEPEW Light API balance...",
+          empty: "PEPEW Light API balance unavailable.",
+          healthy: "Healthy",
+          unhealthy: "Unhealthy"
+        },
+        history: {
+          title: "History",
+          sizeLabel: "Size",
+          empty: "No transaction history found.",
+          loading: "Loading...",
+          openTx: "View details",
+          copyTxid: "Copy TxID",
+          confirmed: "Confirmed",
+          unconfirmed: "Unconfirmed",
+          sourceInfo: "Source: PEPEW Light API / ElectrumX Gateway · Showing {{showing}} of {{total}}"
+        },
+        send: {
+          title: "Send PEPEW",
+          disabledBtn: "Send PEPEW (Disabled in Beta)",
+          consolidateDisabledBtn: "Consolidate UTXOs (Disabled in Beta)",
+          autoConsolidateDisabledBtn: "Auto consolidate (Disabled in Beta)",
+          createOrImportBeforeSending: "Create or import a wallet before sending.",
+          verifyWarn: "Please verify the recipient address carefully. Blockchain transactions cannot be reversed.",
+          fromLabel: "From",
+          toLabel: "To",
+          amountLabel: "Amount",
+          feeLabel: "Fee",
+          subtractFee: "Subtract fee from amount",
+          refreshUtxos: "Refresh UTXOs",
+          advancedConsolidate: "Advanced: Consolidate UTXOs",
+          consolidateDescription: "Manual consolidation sends up to 80 confirmed small UTXOs back to your own current wallet address. Auto mode submits up to 5 independent batches.",
+          consolidateFeeDescription: "Use this only when your wallet has many small UTXOs or a normal send reports too many inputs. Each batch spends a 100 PEPEW network fee.",
+          benefitFromConsolidate: "This wallet may benefit from consolidation.",
+          loadingBalance: "Loading confirmed balance...",
+          confirmedBalance: "Confirmed balance",
+          recipientPlaceholder: "Recipient PEPEW address",
+          recentRecipients: "Recent recipients"
+        },
+        footer: {
+          summary: "Non-custodial wallet",
+          description: "Your mnemonic and private keys stay in this browser. PEPEW Light only receives addresses for lookup and signed raw transactions for broadcast. Never share or screenshot your mnemonic."
+        }
       }
     }
   },

@@ -163,6 +163,18 @@ PEPEW Light Wallet 是非託管錢包。
 請勿將助記詞提供給任何人。
 PEPEW Light API 無法協助找回錢包。
 
+## Language and UI Text
+
+The default UI language is English.
+
+The wallet supports language switching through the top-right language selector:
+
+- English
+- 中文
+- Русский
+
+Do not hard-code bilingual text in wallet components. UI strings should use the i18n dictionary so each selected language is displayed independently.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)

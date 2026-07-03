@@ -543,38 +543,34 @@ export default function Send() {
 
   return (
     <AppLayout>
-      <PageCard title="Send PEPEW">
+      <PageCard title={t("wallet.send.title")}>
         <div className="card" style={{ border: "1px solid rgba(255, 80, 80, 0.45)", marginBottom: 12 }}>
-          <div className="section-title" style={{ color: "rgba(255, 80, 80, 1)" }}>Public Beta / 公開測試版</div>
+          <div className="section-title" style={{ color: "rgba(255, 80, 80, 1)" }}>{t("wallet.beta.title")}</div>
           <div className="muted" style={{ marginTop: 6, lineHeight: 1.55, fontSize: "0.9rem" }}>
-            <div style={{ fontWeight: "bold", marginBottom: 2 }}>English:</div>
-            <div>Read-only wallet features are available. Sending/broadcasting will be added only after signed transaction flow is fully verified.</div>
-
-            <div style={{ fontWeight: "bold", marginTop: 8, marginBottom: 2 }}>中文:</div>
-            <div>目前以查詢餘額與交易紀錄為主。送出交易功能只會在 signed transaction 流程完整驗證後加入。</div>
+            <div>{t("wallet.beta.readOnly")}</div>
           </div>
         </div>
 
         {!fromAddress ? (
           <div className="card">
-            <p className="error">Create or import a wallet before sending.</p>
+            <p className="error">{t("wallet.send.createOrImportBeforeSending")}</p>
             <Link className="btn" to="/" style={{ textDecoration: "none" }}>{t("history.goReceive")}</Link>
           </div>
         ) : (
           <>
             <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <div>
-                <div className="section-title">Send PEPEW</div>
+                <div className="section-title">{t("wallet.send.title")}</div>
                 <p className="muted" style={{ marginTop: 8, marginBottom: 0 }}>
-                  Please verify the recipient address carefully. Blockchain transactions cannot be reversed.
+                  {t("wallet.send.verifyWarn")}
                 </p>
               </div>
 
               <div>
-                <label className="field-label">From</label>
+                <label className="field-label">{t("wallet.send.fromLabel")}</label>
                 <code style={{ display: "block", wordBreak: "break-all", overflowWrap: "anywhere" }}>{fromAddress}</code>
                 <div className="muted" style={{ marginTop: 8 }}>
-                  {balanceLoading ? "Loading confirmed balance..." : balance ? `Confirmed balance: ${balance.confirmed_pepew} PEPEW` : balanceError || "Balance unavailable."}
+                  {balanceLoading ? t("wallet.send.loadingBalance") : balance ? `${t("wallet.send.confirmedBalance")}: ${balance.confirmed_pepew} PEPEW` : balanceError || t("wallet.balance.empty")}
                 </div>
                 {spentOutpoints.size > 0 && (
                   <div className="muted" style={{ marginTop: 6 }}>
@@ -584,17 +580,17 @@ export default function Send() {
               </div>
 
               <div>
-                <label className="field-label">To</label>
+                <label className="field-label">{t("wallet.send.toLabel")}</label>
                 <input
                   className="input"
-                  placeholder="Recipient PEPEW address"
+                  placeholder={t("wallet.send.recipientPlaceholder")}
                   value={to}
                   onChange={(e) => setTo(e.target.value)}
                   disabled={busy}
                 />
                 {recentRecipients.length > 0 && (
                   <div style={{ marginTop: 10 }}>
-                    <div className="muted" style={{ marginBottom: 6 }}>Recent recipients</div>
+                    <div className="muted" style={{ marginBottom: 6 }}>{t("wallet.send.recentRecipients")}</div>
                     <div className="row" style={{ gap: 8 }}>
                       {recentRecipients.map((item) => (
                         <button
@@ -615,7 +611,7 @@ export default function Send() {
 
               <div className="grid two">
                 <div>
-                  <label className="field-label">Amount</label>
+                  <label className="field-label">{t("wallet.send.amountLabel")}</label>
                   <input
                     className="input"
                     inputMode="decimal"
@@ -626,7 +622,7 @@ export default function Send() {
                   />
                 </div>
                 <div>
-                  <label className="field-label">Fee</label>
+                  <label className="field-label">{t("wallet.send.feeLabel")}</label>
                   <input
                     className="input"
                     inputMode="decimal"
@@ -645,7 +641,7 @@ export default function Send() {
                   onChange={(e) => setSubtractFee(e.target.checked)}
                   disabled={busy}
                 />
-                <span>Subtract fee from amount</span>
+                <span>{t("wallet.send.subtractFee")}</span>
               </label>
 
               {displayValidationError && <p className="error" style={{ margin: 0 }}>{displayValidationError}</p>}
@@ -660,10 +656,10 @@ export default function Send() {
                   onClick={handlePrimarySend}
                   disabled={true}
                 >
-                  Send PEPEW (Disabled in Beta)
+                  {t("wallet.send.disabledBtn")}
                 </button>
                 <button className="btn secondary" type="button" onClick={refreshUtxoState} disabled={busy}>
-                  Refresh UTXOs
+                  {t("wallet.send.refreshUtxos")}
                 </button>
                 {hasBroadcastResult && (
                   <button className="btn secondary" type="button" onClick={handleSendAnother} disabled={busy}>
@@ -674,14 +670,14 @@ export default function Send() {
             </div>
 
             <details className="details">
-              <summary>Advanced: Consolidate UTXOs</summary>
+              <summary>{t("wallet.send.advancedConsolidate")}</summary>
               <div style={{ marginTop: 8 }} className="muted">
-                Manual consolidation sends up to {CONSOLIDATION_INPUT_LIMIT} confirmed small UTXOs back to your own current wallet address. Auto mode submits up to {AUTO_CONSOLIDATION_ROUNDS} independent batches.
+                {t("wallet.send.consolidateDescription")}
               </div>
               <div style={{ marginTop: 8 }}>
-                Use this only when your wallet has many small UTXOs or a normal send reports too many inputs. Each batch spends a {DEFAULT_FEE} PEPEW network fee.
+                {t("wallet.send.consolidateFeeDescription")}
               </div>
-              {consolidationNeeded && <p className="muted">This wallet may benefit from consolidation.</p>}
+              {consolidationNeeded && <p className="muted">{t("wallet.send.benefitFromConsolidate")}</p>}
               {consolidationStatus && <p className="success" style={{ marginBottom: 0 }}>{consolidationStatus}</p>}
               {consolidationError && <p className="error" style={{ marginBottom: 0 }}>{consolidationError}</p>}
               {consolidationTxids.length > 0 && (
@@ -704,7 +700,7 @@ export default function Send() {
                   onClick={() => handleConsolidate(false)}
                   disabled={true}
                 >
-                  Consolidate UTXOs (Disabled in Beta)
+                  {t("wallet.send.consolidateDisabledBtn")}
                 </button>
                 <button
                   className="btn secondary"
@@ -712,7 +708,7 @@ export default function Send() {
                   onClick={() => handleConsolidate(true)}
                   disabled={true}
                 >
-                  Auto consolidate (Disabled in Beta)
+                  {t("wallet.send.autoConsolidateDisabledBtn")}
                 </button>
               </div>
             </details>
