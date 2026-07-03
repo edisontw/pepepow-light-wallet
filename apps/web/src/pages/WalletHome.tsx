@@ -132,19 +132,12 @@ export default function WalletHome() {
     <AppLayout>
       <PageCard title={t("title")}>
         <div className="card" style={{ border: "1px solid rgba(255, 170, 0, 0.45)", marginBottom: 12 }}>
-          <div className="section-title" style={{ color: "rgba(255, 170, 0, 1)" }}>Non-custodial Safety Warning / 安全提示</div>
+          <div className="section-title" style={{ color: "rgba(255, 170, 0, 1)" }}>Non-custodial Safety Warning</div>
           <div className="muted" style={{ marginTop: 6, lineHeight: 1.55, fontSize: "0.9rem" }}>
-            <div style={{ fontWeight: "bold", marginBottom: 2 }}>English:</div>
             <div>PEPEW Light Wallet is non-custodial.</div>
             <div>Your mnemonic and private keys stay in your browser.</div>
             <div>Never share your recovery phrase with anyone.</div>
             <div>PEPEW Light API cannot recover your wallet.</div>
-
-            <div style={{ fontWeight: "bold", marginTop: 8, marginBottom: 2 }}>中文:</div>
-            <div>PEPEW Light Wallet 是非託管錢包。</div>
-            <div>助記詞與私鑰只會保存在你的瀏覽器中。</div>
-            <div>請勿將助記詞提供給任何人。</div>
-            <div>PEPEW Light API 無法協助找回錢包。</div>
           </div>
         </div>
 
