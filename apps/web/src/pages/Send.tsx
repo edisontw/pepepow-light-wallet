@@ -16,7 +16,8 @@ const AUTO_CONSOLIDATION_ROUNDS = 3;
 const RECENT_RECIPIENTS_KEY = "pepew_recent_recipients";
 const MAX_RECENT_RECIPIENTS = 8;
 const SPENT_OUTPOINTS_KEY = "pepew_recent_spent_outpoints";
-const SPENT_OUTPOINT_TTL_MS = 10 * 60 * 1000;
+// Short anti-double-click guard only. Fresh UTXO lookups are the source of truth for later sends.
+const SPENT_OUTPOINT_TTL_MS = 30 * 1000;
 const MAX_RECENT_SPENT_OUTPOINTS = 2000;
 
 type SendPhase = "idle" | "loading_utxos" | "fetching_prevtx" | "signing" | "ready" | "broadcasting" | "broadcasted" | "error";
@@ -97,6 +98,35 @@ function saveRecentSpentOutpoints(keys: string[]) {
     const next = [...added, ...kept].slice(0, MAX_RECENT_SPENT_OUTPOINTS);
     localStorage.setItem(SPENT_OUTPOINTS_KEY, JSON.stringify(next));
     return new Set<string>(next.map((item) => item.key));
+  } catch {
+    return loadRecentSpentOutpoints();
+  }
+}
+
+function clearRecentSpentOutpoints() {
+  try {
+    localStorage.removeItem(SPENT_OUTPOINTS_KEY);
+  } catch {
+    // ignore storage failures
+  }
+  return new Set<string>();
+}
+
+function reconcileRecentSpentOutpoints(utxos: LightUtxo[]) {
+  try {
+    const now = Date.now();
+    const availableKeys = new Set(utxos.map(outpointKey));
+    const raw = localStorage.getItem(SPENT_OUTPOINTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const kept: SpentOutpointRecord[] = Array.isArray(parsed)
+      ? parsed.filter((item) =>
+          typeof item?.key === "string" &&
+          Number(item.expiresAt || 0) > now &&
+          availableKeys.has(item.key)
+        )
+      : [];
+    localStorage.setItem(SPENT_OUTPOINTS_KEY, JSON.stringify(kept));
+    return new Set<string>(kept.map((item) => item.key));
   } catch {
     return loadRecentSpentOutpoints();
   }
@@ -263,13 +293,22 @@ export default function Send() {
 
     try {
       setPhase("loading_utxos");
-      const latestSpent = loadRecentSpentOutpoints();
-      setSpentOutpoints(latestSpent);
       const utxoResult = await pepewLightClient.getUtxo(fromAddress);
+      let latestSpent = reconcileRecentSpentOutpoints(utxoResult.utxos);
+      setSpentOutpoints(latestSpent);
       const confirmedBeforeExclusion = utxoResult.utxos.filter((u) => Number(u.height) > 0 && Number(u.value) > 0);
       const unconfirmedAvailable = utxoResult.utxos.some((u) => Number(u.height) <= 0 && Number(u.value) > 0);
-      const spendable = spendableConfirmedUtxos(utxoResult.utxos, latestSpent);
-      const spendableTotal = spendable.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
+      let spendable = spendableConfirmedUtxos(utxoResult.utxos, latestSpent);
+      let spendableTotal = spendable.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
+
+      if (spendableTotal < totalSpentAtomic && latestSpent.size > 0) {
+        // Fresh API UTXOs are authoritative. If local recently-spent markers are the only blocker,
+        // clear them automatically so the next send does not require a full page refresh.
+        latestSpent = clearRecentSpentOutpoints();
+        setSpentOutpoints(latestSpent);
+        spendable = confirmedBeforeExclusion;
+        spendableTotal = spendable.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
+      }
 
       if (!spendable.length) {
         if (confirmedBeforeExclusion.length > 0) {
@@ -281,7 +320,7 @@ export default function Send() {
         throw new Error("No confirmed UTXOs available for sending.");
       }
       if (spendableTotal < totalSpentAtomic) {
-        throw new Error("Insufficient confirmed funds after excluding recently spent UTXOs. Please wait for the previous send to confirm or reduce the amount.");
+        throw new Error("Insufficient confirmed funds. Please wait for confirmation, press Refresh UTXOs, or reduce the amount.");
       }
 
       const selected = selectUtxos(
@@ -354,6 +393,19 @@ export default function Send() {
     if (preview) await broadcast(preview);
   };
 
+  const refreshUtxoState = async () => {
+    setError(null);
+    setSignedPreview(null);
+    setSpentOutpoints(clearRecentSpentOutpoints());
+    try {
+      const data = await pepewLightClient.getAddress(fromAddress);
+      setBalance(data.balance);
+    } catch {
+      // Keep the current balance display if refresh fails.
+    }
+    if (phase === "error") setPhase("idle");
+  };
+
   const handleSendAnother = () => {
     setTo("");
     setAmount("");
@@ -364,7 +416,7 @@ export default function Send() {
     setConsolidationError(null);
     setError(null);
     setAttemptedSend(false);
-    setSpentOutpoints(loadRecentSpentOutpoints());
+    setSpentOutpoints(clearRecentSpentOutpoints());
     setPhase("idle");
   };
 
@@ -587,6 +639,9 @@ export default function Send() {
                   disabled={busy}
                 >
                   {primaryButtonLabel}
+                </button>
+                <button className="btn secondary" type="button" onClick={refreshUtxoState} disabled={busy}>
+                  Refresh UTXOs
                 </button>
                 {hasBroadcastResult && (
                   <button className="btn secondary" type="button" onClick={handleSendAnother} disabled={busy}>
