@@ -544,6 +544,17 @@ export default function Send() {
   return (
     <AppLayout>
       <PageCard title="Send PEPEW">
+        <div className="card" style={{ border: "1px solid rgba(255, 80, 80, 0.45)", marginBottom: 12 }}>
+          <div className="section-title" style={{ color: "rgba(255, 80, 80, 1)" }}>Public Beta / 公開測試版</div>
+          <div className="muted" style={{ marginTop: 6, lineHeight: 1.55, fontSize: "0.9rem" }}>
+            <div style={{ fontWeight: "bold", marginBottom: 2 }}>English:</div>
+            <div>Read-only wallet features are available. Sending/broadcasting will be added only after signed transaction flow is fully verified.</div>
+
+            <div style={{ fontWeight: "bold", marginTop: 8, marginBottom: 2 }}>中文:</div>
+            <div>目前以查詢餘額與交易紀錄為主。送出交易功能只會在 signed transaction 流程完整驗證後加入。</div>
+          </div>
+        </div>
+
         {!fromAddress ? (
           <div className="card">
             <p className="error">Create or import a wallet before sending.</p>
@@ -647,9 +658,9 @@ export default function Send() {
                 <button
                   className="btn"
                   onClick={handlePrimarySend}
-                  disabled={busy}
+                  disabled={true}
                 >
-                  {primaryButtonLabel}
+                  Send PEPEW (Disabled in Beta)
                 </button>
                 <button className="btn secondary" type="button" onClick={refreshUtxoState} disabled={busy}>
                   Refresh UTXOs
@@ -691,17 +702,17 @@ export default function Send() {
                   className="btn secondary"
                   type="button"
                   onClick={() => handleConsolidate(false)}
-                  disabled={busy}
+                  disabled={true}
                 >
-                  Consolidate UTXOs
+                  Consolidate UTXOs (Disabled in Beta)
                 </button>
                 <button
                   className="btn secondary"
                   type="button"
                   onClick={() => handleConsolidate(true)}
-                  disabled={busy}
+                  disabled={true}
                 >
-                  Auto consolidate up to 3 rounds
+                  Auto consolidate (Disabled in Beta)
                 </button>
               </div>
             </details>

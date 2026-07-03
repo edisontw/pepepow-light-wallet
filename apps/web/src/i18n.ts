@@ -67,7 +67,11 @@ const resources = {
         checking: "檢查中"
       },
       errors: {
-        apiUnreachable: "無法連線 API",
+        apiUnreachable: "無法連線到 PEPEW Light API，請稍後再試。",
+        invalidAddress: "PEPEPOW 地址格式不正確。",
+        rateLimit: "網路服務暫時忙碌，請稍後再試。",
+        noHistory: "查無交易紀錄。",
+        txLoadFailed: "無法載入此交易。",
         apiNotFound: "API endpoint 不存在",
         networkError: "網路錯誤",
         unexpected: "未預期的錯誤",
@@ -259,7 +263,7 @@ const resources = {
       history: {
         title: "紀錄",
         emptyAddress: "請先在首頁設定你的地址。",
-        emptyTxs: "尚無交易紀錄。",
+        emptyTxs: "查無交易紀錄。",
         goReceive: "前往收款",
         goSend: "前往發送",
         showMore: "Show more",
@@ -398,7 +402,11 @@ const resources = {
         checking: "CHECKING"
       },
       errors: {
-        apiUnreachable: "Unable to reach API",
+        apiUnreachable: "Unable to connect to PEPEW Light API. Please try again later.",
+        invalidAddress: "Invalid PEPEPOW address.",
+        rateLimit: "Network service is temporarily busy.",
+        noHistory: "No transaction history found.",
+        txLoadFailed: "This transaction could not be loaded.",
         apiNotFound: "API endpoint not found",
         networkError: "Network error",
         unexpected: "Unexpected error",
@@ -597,7 +605,7 @@ const resources = {
       history: {
         title: "History",
         emptyAddress: "Set your address on Home first.",
-        emptyTxs: "No transactions yet.",
+        emptyTxs: "No transaction history found.",
         goReceive: "Go to Receive",
         goSend: "Go to Send",
         showMore: "Show more",

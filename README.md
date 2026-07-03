@@ -1,8 +1,12 @@
 # PEPEW Light Wallet
 
-Client-side, non-custodial web wallet for the PEPEPOW / PEPEW blockchain.
+PEPEW Light Wallet is a client-side, non-custodial PEPEPOW web wallet.
+It uses PEPEW Light API for balance, history, UTXO, and transaction lookups.
+Mnemonic/private keys are handled only in the browser.
 
-This repository contains the browser wallet UI and local wallet logic. It is intended to be deployed as a static Vite/React app and served with the PEPEW Light API gateway at `https://light.pepepow.net/wallet/`.
+## Public Beta Notice
+
+This is a public beta release. Only read-only wallet queries (balance, history, QR) are currently enabled. Transaction signing and broadcasting is temporarily disabled during beta validation.
 
 ## Current focus
 

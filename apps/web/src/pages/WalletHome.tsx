@@ -8,6 +8,7 @@ import { deriveFromMnemonic, generateMnemonic, validateMnemonic, PEPEPOW, pubkey
 import AppLayout from "../components/layout/AppLayout";
 import PageCard from "../components/layout/PageCard";
 import { pepewLightClient, LightAddressBalance } from "../lib/pepewLightClient";
+import { fmtPEPEWFromSats } from "../lib/format";
 
 
 type CopyStatus = "idle" | "copied" | "failed";
@@ -36,6 +37,8 @@ export default function WalletHome() {
   const [lightBalance, setLightBalance] = useState<LightAddressBalance | null>(null);
   const [lightBalanceError, setLightBalanceError] = useState<string | null>(null);
   const [lightBalanceLoading, setLightBalanceLoading] = useState(false);
+  const [understandRisk, setUnderstandRisk] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
   const defaultPath = "m/44'/5'/0'/0/0";
 
   const normalizedMnemonic = normalizeMnemonicInput(mnemo);
@@ -64,6 +67,7 @@ export default function WalletHome() {
         const data = await pepewLightClient.getAddress(trimmed);
         if (!active) return;
         setLightBalance(data.balance);
+        setLastUpdated(new Date().toLocaleString());
       } catch (e: any) {
         if (!active) return;
         setLightBalance(null);
@@ -116,6 +120,18 @@ export default function WalletHome() {
     }
   };
 
+  const clearWallet = () => {
+    if (window.confirm("Are you sure you want to clear the wallet from this browser? Make sure you have backed up your mnemonic phrase!")) {
+      localStorage.removeItem("pepew_mnemonic");
+      localStorage.removeItem("pepew_address");
+      setMnemo("");
+      setAddress("");
+      setLightBalance(null);
+      setWalletError(null);
+      setUnderstandRisk(false);
+    }
+  };
+
   const copyMnemonic = async () => {
     if (!mnemo) return;
     try {
@@ -131,25 +147,58 @@ export default function WalletHome() {
   return (
     <AppLayout>
       <PageCard title={t("title")}>
-        <div className="card" style={{ border: "1px solid rgba(255, 170, 0, 0.45)", marginBottom: 12 }}>
-          <div className="section-title" style={{ color: "rgba(255, 170, 0, 1)" }}>Non-custodial Safety Warning</div>
+        <div className="card" style={{ border: "1px solid rgba(0, 150, 255, 0.45)", marginBottom: 12 }}>
+          <div className="section-title" style={{ color: "rgba(0, 150, 255, 1)" }}>Public Beta / 公開測試版</div>
           <div className="muted" style={{ marginTop: 6, lineHeight: 1.55, fontSize: "0.9rem" }}>
-            <div>PEPEW Light Wallet is non-custodial.</div>
+            <div style={{ fontWeight: "bold", marginBottom: 2 }}>English:</div>
+            <div>Read-only wallet features are available. Sending/broadcasting will be added only after signed transaction flow is fully verified.</div>
+
+            <div style={{ fontWeight: "bold", marginTop: 8, marginBottom: 2 }}>中文:</div>
+            <div>目前以查詢餘額與交易紀錄為主。送出交易功能只會在 signed transaction 流程完整驗證後加入。</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ border: "1px solid rgba(255, 170, 0, 0.45)", marginBottom: 12 }}>
+          <div className="section-title" style={{ color: "rgba(255, 170, 0, 1)" }}>Non-custodial Safety Warning / 安全提示</div>
+          <div className="muted" style={{ marginTop: 6, lineHeight: 1.55, fontSize: "0.9rem" }}>
+            <div style={{ fontWeight: "bold", marginBottom: 2 }}>English:</div>
             <div>Your mnemonic and private keys stay in your browser.</div>
-            <div>Never share your recovery phrase with anyone.</div>
-            <div>PEPEW Light API cannot recover your wallet.</div>
+            <div>The server never receives your mnemonic or private keys.</div>
+            <div>Back up your recovery phrase before using the wallet.</div>
+
+            <div style={{ fontWeight: "bold", marginTop: 8, marginBottom: 2 }}>中文:</div>
+            <div>助記詞與私鑰只保存在你的瀏覽器中。</div>
+            <div>伺服器不會接收你的助記詞或私鑰。</div>
+            <div>使用前請自行備份 recovery phrase。</div>
           </div>
         </div>
 
         <div className="card">
           <div className="section-title">{t("home.localWallet")}</div>
-          <div className="row" style={{ marginTop: 6 }}>
-            <button className="btn" onClick={createWallet}>{t("home.createWallet")}</button>
-            <button className="btn secondary" onClick={applyMnemonic} disabled={!mnemonicValid}>{t("home.useMnemonic")}</button>
+          
+          <label className="row" style={{ marginTop: 10, marginBottom: 10, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={understandRisk}
+              onChange={(e) => setUnderstandRisk(e.target.checked)}
+            />
+            <span style={{ fontSize: "0.9rem", userSelect: "none" }}>
+              I understand that my keys are stored only in this browser and I must back them up. / 我理解金鑰僅保存在此瀏覽器中，且我已自行備份。
+            </span>
+          </label>
+
+          <div className="row" style={{ marginTop: 6, flexWrap: "wrap", gap: 8 }}>
+            <button className="btn" onClick={createWallet} disabled={!understandRisk}>{t("home.createWallet")}</button>
+            <button className="btn secondary" onClick={applyMnemonic} disabled={!mnemonicValid || !understandRisk}>{t("home.useMnemonic")}</button>
             <button className="btn ghost" onClick={() => setShowMnemonic((prev) => !prev)}>
               {showMnemonic ? t("hide") : t("show")}
             </button>
             <button className="btn secondary" onClick={copyMnemonic} disabled={!mnemo}>{t("copy")}</button>
+            {mnemo && (
+              <button className="btn" style={{ backgroundColor: "rgba(220, 50, 50, 1)", color: "white" }} onClick={clearWallet}>
+                Forget Wallet / 清除錢包
+              </button>
+            )}
             {copyStatus === "copied" && <span className="muted">{t("copied")}</span>}
             {copyStatus === "failed" && <span className="error">{t("copyFailed")}</span>}
             {walletError && <span className="error">{walletError}</span>}
@@ -194,15 +243,19 @@ export default function WalletHome() {
                 <div className="muted" style={{ marginTop: 6 }}>Loading PEPEW Light API balance...</div>
               ) : lightBalance ? (
                 <>
-                  <div style={{ fontSize: "1.25rem", fontWeight: 700, marginTop: 6 }}>
-                    {lightBalance.confirmed_pepew} PEPEW
+                  <div style={{ fontSize: "1.5rem", fontWeight: 700, marginTop: 6 }}>
+                    {fmtPEPEWFromSats(lightBalance.confirmed, { decimals: 4 })}
                   </div>
                   {Number(lightBalance.unconfirmed) > 0 && (
-                    <div className="muted" style={{ marginTop: 4 }}>
-                      Unconfirmed: {lightBalance.unconfirmed_pepew} PEPEW
+                    <div className="muted" style={{ marginTop: 4, fontSize: "1rem" }}>
+                      Unconfirmed: {fmtPEPEWFromSats(lightBalance.unconfirmed, { decimals: 4 })}
                     </div>
                   )}
-                  <div className="muted" style={{ marginTop: 6 }}>Source: PEPEW Light API / ElectrumX Gateway</div>
+                  <div className="muted" style={{ marginTop: 8, fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div>API Status: <span style={{ color: "rgba(0, 200, 100, 1)", fontWeight: "bold" }}>Healthy</span></div>
+                    {lastUpdated && <div>Updated: {lastUpdated}</div>}
+                    <div>Source: PEPEW Light API / ElectrumX Gateway</div>
+                  </div>
                 </>
               ) : (
                 <div className="error" style={{ marginTop: 6 }}>

@@ -367,7 +367,12 @@ export default function History() {
                               <span>{tx.heightLabel}</span>
                             </div>
                             <div className="tx-line"><span className="muted">{t("history.timeLabel")}: </span><span>{tx.timeLabel}</span></div>
-                            <div className="tx-line"><span className="muted">{t("history.txidLabel")}: </span><code title={tx.txid}>{shortTxid(tx.txid)}</code></div>
+                            <div className="tx-line">
+                              <span className="muted">{t("history.txidLabel")}: </span>
+                              <a href={`/tx?txid=${tx.txid}`} target="_blank" rel="noopener noreferrer" title={tx.txid} style={{ color: "var(--primary-color)", textDecoration: "underline" }}>
+                                <code>{shortTxid(tx.txid)}</code>
+                              </a>
+                            </div>
                           </div>
 
                           <div className="tx-actions">

@@ -1,9 +1,6 @@
-const DEFAULT_TIMEOUT_MS = 8000;
+import i18n from "../i18n";
 
-const ADDRESS_ERROR_MESSAGE = "Invalid PEPEW address. Please check the address format and try again.";
-const API_UNAVAILABLE_MESSAGE = "PEPEW Light API is temporarily unavailable. Please try again later.";
-const RATE_LIMIT_MESSAGE = "Too many requests. Please wait a moment and try again.";
-const TIMEOUT_MESSAGE = "Balance lookup timed out. Please try again.";
+const DEFAULT_TIMEOUT_MS = 8000;
 
 export interface LightAddressBalance {
   confirmed: number;
@@ -95,7 +92,7 @@ function mapLightApiError(raw: string, status?: number) {
     text.includes("invalid pepepow address") ||
     text.includes("invalid pepew address")
   ) {
-    return ADDRESS_ERROR_MESSAGE;
+    return i18n.t("errors.invalidAddress");
   }
   if (text.includes("broadcast_rejected") || text.includes("missing inputs") || text.includes("txn-mempool-conflict")) {
     return "Transaction was rejected. The wallet may still be seeing stale UTXOs from a recent send; wait for the previous send to appear in history, then try again.";
@@ -104,18 +101,21 @@ function mapLightApiError(raw: string, status?: number) {
     return "Signed transaction is invalid.";
   }
   if (status === 429 || text.includes("too many requests") || text.includes("rate limit")) {
-    return RATE_LIMIT_MESSAGE;
+    return i18n.t("errors.rateLimit");
   }
   if (text.includes("timeout") || text.includes("timed out") || text.includes("abort")) {
-    return TIMEOUT_MESSAGE;
+    return i18n.t("errors.rateLimit");
+  }
+  if (text.includes("tx_not_found") || text.includes("txnotfound") || text.includes("invalid_txid") || text.includes("tx_lookup")) {
+    return i18n.t("errors.txLoadFailed");
   }
   if (status && status >= 500) {
-    return API_UNAVAILABLE_MESSAGE;
+    return i18n.t("errors.apiUnreachable");
   }
   if (text.includes("network") || text.includes("failed to fetch") || text.includes("temporarily unavailable")) {
-    return API_UNAVAILABLE_MESSAGE;
+    return i18n.t("errors.apiUnreachable");
   }
-  return raw || API_UNAVAILABLE_MESSAGE;
+  return raw || i18n.t("errors.apiUnreachable");
 }
 
 export class PepewLightApiClient {
@@ -152,7 +152,7 @@ export class PepewLightApiClient {
     } catch (err: any) {
       clearTimeout(timer);
       if (err?.name === "AbortError") {
-        throw new Error(TIMEOUT_MESSAGE);
+        throw new Error(i18n.t("errors.rateLimit"));
       }
       throw new Error(mapLightApiError(err?.message || "network error"));
     }
