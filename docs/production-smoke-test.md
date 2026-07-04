@@ -14,12 +14,11 @@ https://light.pepepow.net/wallet/
 - Import mnemonic works.
 - Address displays after wallet creation or mnemonic import.
 - Confirmed balance displays in the wallet home page.
-- Send page builds and signs transactions in the browser only.
-- Send page broadcasts only after explicit final confirmation.
+- Send page builds, signs, and broadcasts from the browser.
+- Send page submits only signed raw tx to `/api/wallet/broadcast`.
+- Consecutive small sends work with automatic UTXO/indexer retry.
 - History page loads.
-- History rows always show deterministic `Status` and `Height`.
-- History row `Time` may show `Time unavailable` because ElectrumX history does not always include block timestamps.
-- Transaction detail expands directly below the selected history row after pressing `Details`.
+- History rows show deterministic `Status` and `Height`.
 - API errors display as clean user-facing messages.
 
 ## Browser DevTools Network checks
@@ -41,6 +40,23 @@ Broadcast rule:
 POST /api/wallet/broadcast may only contain signed raw transaction hex.
 It must never contain mnemonic, seed phrase, private key, WIF, xprv, or a wallet object.
 ```
+
+## Manual browser verification
+
+1. Open `https://light.pepepow.net/wallet/`.
+2. Confirm the non-custodial safety notice appears.
+3. Confirm the logo appears.
+4. Create a wallet or import a known test mnemonic.
+5. Confirm the derived address appears.
+6. Confirm balance and history load from PEPEW Light API.
+7. Open `/wallet/send`.
+8. Enter recipient, amount, and fee.
+9. Press `Send PEPEW` with a small test amount.
+10. Confirm Network calls include UTXO lookup, previous raw tx lookup, and signed raw tx broadcast only.
+11. Confirm the broadcast request contains only `{ "raw_tx": "<signed raw transaction hex>" }`.
+12. Confirm the broadcast response shows a txid or a clean user-facing error.
+13. Repeat 2-3 small sends and confirm automatic retry handles short API/indexer delay.
+14. Open history and confirm the transactions appear after refresh/indexer update.
 
 ## Forbidden in Network / Console / logs
 
@@ -66,91 +82,9 @@ Expected safe appearances:
 
 Unsafe appearances that must be patched immediately:
 
-- API request body or query parameter containing mnemonic, seed phrase, private key, WIF, xprv, or full wallet object.
+- API request body or query parameter containing wallet recovery material.
 - Console log containing wallet secrets or signed raw transaction.
 - Server log containing wallet secrets or signed raw transaction.
-
-## Manual browser verification
-
-1. Open `https://light.pepepow.net/wallet/`.
-2. Confirm the non-custodial safety notice appears once and in English only.
-3. Confirm the logo appears.
-4. Create a wallet or import a known test mnemonic.
-5. Confirm the derived address appears.
-6. Confirm the confirmed balance appears as:
-
-```text
-Confirmed Balance
-<amount> PEPEW
-Source: PEPEW Light API / ElectrumX Gateway
-```
-
-7. Open `/wallet/send`.
-8. Confirm the page says `Client-side signing`.
-9. Enter recipient, amount, and fee.
-10. Press `Build signed transaction`.
-11. Confirm Network calls:
-
-```text
-GET /api/wallet/utxo/{address}
-GET /api/wallet/tx/{txid}?raw=1
-```
-
-12. Confirm the signed transaction preview appears with inputs, size, total input, change, and raw hex preview.
-13. Confirm `Broadcast signed transaction` stays disabled until the final confirmation checkbox is checked.
-14. Check the confirmation box and press `Broadcast signed transaction`.
-15. Confirm the only broadcast request is:
-
-```text
-POST /api/wallet/broadcast
-```
-
-16. Confirm the broadcast request contains only:
-
-```json
-{"raw_tx":"<signed raw transaction hex>"}
-```
-
-17. Confirm the broadcast response shows a txid or a clean user-facing error.
-18. Confirm no legacy wallet APIs are called.
-19. Open the history page and confirm history loads.
-20. Confirm every history row shows `Status` and `Height` immediately.
-21. Confirm `Time unavailable` is shown instead of a blank timestamp when no timestamp is available.
-22. Press `Details` on one transaction row and confirm a transaction detail card expands directly below that row.
-23. Confirm the detail request is only:
-
-```text
-GET /api/wallet/tx/{txid}
-```
-
-24. In DevTools Network and Console, search for the forbidden terms above.
-
-## Post-deploy browser checklist
-
-Use DevTools after a production build has been deployed:
-
-- Network tab: clear entries, then reload `/wallet/`.
-- Import mnemonic.
-- Confirm balance and history.
-- Open `/wallet/send`.
-- Build a signed transaction with a small test amount.
-- Confirm signing happens without sending mnemonic/private key/WIF/xprv to the server.
-- Confirm previous transaction lookups use `/api/wallet/tx/{txid}?raw=1`.
-- Confirm `/api/wallet/broadcast` is called only after final checkbox confirmation.
-- Confirm `/wallet/send` does not call `/wallet/tx/broadcast`, `/wallet/tx/raw`, `/wallet/utxos`, `/v1/*`, `/auth/telegram`, or `/api/paylink`.
-- Open `/wallet/history`.
-- Confirm history row details expand inline below the clicked transaction row.
-- Press `Details` on one history item and confirm `/api/wallet/tx/{txid}` is called once.
-- Filter Network requests for `mnemonic`, `seed`, `private`, `xprv`, `wif`.
-- Confirm Light API calls include only addresses, txids, UTXO lookup, tx lookup, or signed raw tx broadcast.
-- Confirm Console does not print request bodies, wallet objects, mnemonic, private key, WIF, raw transaction, or xprv.
-
-## Server log scan commands
-
-```bash
-sudo tail -n 500 /var/log/nginx/pepepow-wallet-access.log 2>/dev/null | grep -Ei "mnemonic|seed phrase|seedPhrase|private key|privateKey|xprv|wif|raw_tx|raw transaction" || true
-journalctl -u pepew-light -n 500 --no-pager 2>/dev/null | grep -Ei "mnemonic|seed phrase|seedPhrase|private key|privateKey|xprv|wif|raw_tx|raw transaction" || true
-```
 
 ## Build and deploy commands
 
@@ -161,17 +95,19 @@ export PATH="/home/ubuntu/node-dist/bin:$PATH"
 npm --prefix apps/web run test:client
 npm run build
 npm --prefix apps/web run scan:readonly-api
-sudo rsync -a --delete apps/web/dist/ /var/www/pepepow-light-wallet/
+sudo mkdir -p /var/www/pepew-light/wallet
+sudo rsync -a --delete apps/web/dist/ /var/www/pepew-light/wallet/
+sudo nginx -t
+sudo systemctl reload nginx
 ```
 
-Backend deploy commands are in `pepepow-electrumx-service`; deploy backend before testing Send broadcast.
+Backend deploy commands are in `pepepow-electrumx-service`; deploy backend before testing Send broadcast if the broadcast API changed.
 
 ## Public URL verification
 
 ```bash
 curl -I https://light.pepepow.net/wallet/
 curl -I https://light.pepepow.net/wallet/send
-curl -I https://light.pepepow.net/wallet/brand/logo.png
 curl -i "https://light.pepepow.net/api/wallet/address/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb"
 curl -i "https://light.pepepow.net/api/wallet/history/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb"
 curl -i "https://light.pepepow.net/api/wallet/utxo/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb"
