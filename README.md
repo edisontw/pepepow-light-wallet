@@ -1,12 +1,16 @@
 # PEPEW Light Wallet
 
-PEPEW Light Wallet is a client-side, non-custodial PEPEPOW web wallet.
-It uses PEPEW Light API for balance, history, UTXO, and transaction lookups.
-Mnemonic/private keys are handled only in the browser.
+PEPEW Light Wallet is a client-side, non-custodial PEPEPOW web wallet served under:
 
-## Public Beta Notice
+```text
+https://light.pepepow.net/wallet/
+```
 
-This is a public beta release. Only read-only wallet queries (balance, history, QR) are currently enabled. Transaction signing and broadcasting is temporarily disabled during beta validation.
+It uses PEPEW Light API for balance, history, UTXO, transaction lookup, and signed raw transaction broadcast. Mnemonic and private keys are handled only in the browser.
+
+## Public beta notice
+
+This is a public beta release. Small-amount send testing is working, including consecutive sends with automatic UTXO/indexer retry. Users should test with small amounts first.
 
 ## Current focus
 
@@ -16,9 +20,10 @@ Phase 4.5 / Phase 5 development focuses on making the public ElectrumX-based web
 - balance and history display through PEPEW Light API
 - receive address and QR display
 - mnemonic import UX polish
-- clear non-custodial safety warnings in English and Chinese
+- clear non-custodial safety warnings
 - friendly API / address / network error handling
-- signed raw transaction broadcast only after the send flow is reviewed
+- client-side transaction signing
+- signed raw transaction broadcast only
 
 ## Security boundary
 
@@ -26,7 +31,7 @@ This project is non-custodial.
 
 - Mnemonics and private keys must stay in the browser/client only.
 - The server must never receive, store, log, derive, or sign with private keys.
-- Address lookup, history, UTXO, transaction lookup, and future broadcast use the PEPEW Light API.
+- Address lookup, history, UTXO, transaction lookup, and broadcast use the PEPEW Light API.
 - Broadcast must submit only an already-signed raw transaction.
 - The API gateway is `pepepow-electrumx-service`; it must not contain mnemonic, private-key, or signing code.
 
@@ -39,7 +44,7 @@ User Browser
   └─ PEPEW Light Wallet (Vite / React)
        ├─ mnemonic import / local derivation / local signing
        ├─ balance, history, UTXO, tx lookup
-       └─ future signed raw tx broadcast
+       └─ signed raw tx broadcast
             ↓ HTTPS same-origin
 Nginx / static wallet / reverse proxy
             ↓
@@ -53,7 +58,7 @@ PEPEPOWd
 Repository split:
 
 - `pepepow-light-wallet`: frontend wallet and client-side wallet logic only.
-- `pepepow-electrumx-service`: FastAPI gateway, cache, status pages, read-only wallet API, and future signed-tx broadcast endpoint.
+- `pepepow-electrumx-service`: FastAPI gateway, cache, status pages, wallet API, and signed-tx broadcast endpoint.
 - `electrumx-pepepow`: ElectrumX chain support only.
 
 ## Repository layout
@@ -67,8 +72,6 @@ packages/wallet-core/     PEPEPOW address / derivation / transaction helpers
 docs/                     Current wallet architecture, API integration, security, deployment notes
 ops/                      Optional operational scripts/tests
 ```
-
-Old `pepepow-wallet-suite` material such as trading bots, Telegram wallet control plane, and standalone `pepew-api` service documentation is intentionally not part of this repo's active scope.
 
 ## Requirements
 
@@ -108,8 +111,6 @@ For development against a different PEPEW Light API host, set:
 VITE_PEPEW_LIGHT_API_BASE_URL=https://light.pepepow.net
 ```
 
-Do not point the public wallet at legacy `api.pepepow.net` routes unless a compatibility layer has been explicitly reviewed.
-
 ## Build and checks
 
 ```bash
@@ -125,18 +126,43 @@ Important checks before deployment:
 - no mnemonic/private-key/signing data is sent to the API
 - static assets resolve correctly under `/wallet/`
 - balance and history load from PEPEW Light API
+- send submits only signed raw tx
 - API unavailable / invalid address / timeout errors show user-friendly messages
 - non-custodial warning is visible before or during mnemonic import
 
-## Production Deployment
+## Production deployment
 
 Production wallet:
 
+```text
 https://light.pepepow.net/wallet/
+```
 
 Production API:
 
+```text
 https://light.pepepow.net/api/wallet/*
+```
+
+Correct static deploy target:
+
+```text
+/var/www/pepew-light/wallet/
+```
+
+Build and deploy:
+
+```bash
+cd /home/ubuntu/pepepow-light-wallet
+git pull origin main
+export PATH="/home/ubuntu/node-dist/bin:$PATH"
+rm -rf apps/web/dist
+npm run build
+sudo mkdir -p /var/www/pepew-light/wallet
+sudo rsync -a --delete apps/web/dist/ /var/www/pepew-light/wallet/
+sudo nginx -t
+sudo systemctl reload nginx
+```
 
 This wallet is deployed under `/wallet/`, so Vite must use:
 
@@ -144,14 +170,7 @@ This wallet is deployed under `/wallet/`, so Vite must use:
 base: '/wallet/'
 ```
 
-For production, the wallet should use same-origin API paths.
-For local development, set:
-
-```env
-VITE_PEPEW_LIGHT_API_BASE_URL=http://localhost:8000
-```
-
-## Non-custodial Security Notice
+## Non-custodial security notice
 
 PEPEW Light Wallet is non-custodial.
 Your mnemonic and private keys stay in your browser.
@@ -163,7 +182,7 @@ PEPEW Light Wallet 是非託管錢包。
 請勿將助記詞提供給任何人。
 PEPEW Light API 無法協助找回錢包。
 
-## Language and UI Text
+## Language and UI text
 
 The default UI language is English.
 
@@ -181,4 +200,6 @@ Do not hard-code bilingual text in wallet components. UI strings should use the 
 - [Security](docs/security.md)
 - [PEPEW Light API integration](docs/pepew-api.md)
 - [Deployment layout](docs/deploy_layout.md)
+- [Production deploy path](docs/deploy-light-pepepow-net.md)
+- [Send beta test notes](docs/send-beta-test-notes.md)
 - [Development compass](docs/DEV_COMPASS.md)
