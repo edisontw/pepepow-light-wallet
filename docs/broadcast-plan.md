@@ -1,27 +1,23 @@
-# PEPEW Light Wallet Broadcast Plan
+# PEPEW Light Wallet Broadcast Contract
 
-This document defines the planned signed raw transaction broadcast flow for the PEPEW Light web wallet.
+This document defines the current signed raw transaction broadcast flow for the PEPEW Light web wallet.
 
-The current public beta must remain non-custodial. The backend must never receive, store, derive, log, or inspect wallet mnemonics or private keys.
-
-## 1. Security boundary
+## Security boundary
 
 - Mnemonic and private keys stay in the browser only.
 - Transaction signing happens client-side only.
-- The backend accepts only addresses, txids, read-only queries, and future signed raw transactions.
+- The backend accepts only addresses, txids, read queries, and signed raw transactions.
 - The backend never accepts mnemonic phrases, private keys, WIF keys, derivation seeds, or unsigned transaction signing requests.
 - ElectrumX remains behind the PEPEW Light API gateway and is not directly exposed to public clients.
 
-## 2. Future endpoint
-
-Planned endpoint:
+## Endpoint
 
 ```http
 POST /api/wallet/broadcast
 Content-Type: application/json
 ```
 
-Draft request body:
+Request body:
 
 ```json
 {
@@ -29,69 +25,70 @@ Draft request body:
 }
 ```
 
-Draft success response:
+Success response:
 
 ```json
 {
   "ok": true,
   "txid": "<broadcast transaction id>",
-  "status": "broadcasted"
+  "source": "electrumx",
+  "signed_raw_tx_only": true
 }
 ```
 
-Draft error response:
+Error response:
 
 ```json
 {
   "ok": false,
   "error": {
     "code": "invalid_raw_tx",
-    "message": "Invalid signed transaction payload."
+    "message": "Signed raw transaction must be hex."
   }
 }
 ```
 
-## 3. Backend validation checklist
+## Backend validation checklist
 
 Before forwarding any transaction to the node or broadcast backend, validate:
 
 - `raw_tx` exists and is a string.
+- request body contains only `raw_tx`.
+- request body rejects extra fields and signing material fields.
 - `raw_tx` is hex only: `^[0-9a-fA-F]+$`.
 - `raw_tx` length is even.
 - `raw_tx` byte size is under the configured maximum.
 - Request body size is limited at the reverse proxy and application layer.
 - API response does not expose internal node, ElectrumX, filesystem, or stack trace details.
 - Rate limiting is enabled.
-- Logging avoids address-IP linkage beyond short operational needs.
+- Logging avoids address/IP linkage beyond short operational needs.
 
-## 4. Client-side signing flow
+## Client-side signing flow
 
-Planned wallet flow:
+Wallet flow:
 
 1. User creates or imports mnemonic in the browser.
 2. Client derives the PEPEW address locally.
 3. Client fetches balance, UTXOs, and previous transaction data from PEPEW Light API.
 4. Client builds and signs the transaction locally.
-5. Client shows a confirmation screen before broadcast.
-6. User confirms recipient, amount, fee, change, and total spend.
-7. Client sends only the signed raw transaction to `/api/wallet/broadcast`.
-8. Backend broadcasts the signed transaction and returns txid/status.
+5. Client sends only the signed raw transaction to `/api/wallet/broadcast`.
+6. Backend broadcasts the signed transaction and returns txid/status.
+7. Client records recently spent outpoints to avoid selecting stale API outputs.
+8. Client retries briefly while the API/indexer catches up after consecutive sends.
 
-## 5. UI confirmation checklist
+## UI summary checklist
 
-Before broadcast, the UI should show:
+Before or during send, the UI should show:
 
 - Sender address.
 - Recipient address.
 - Recipient amount.
 - Network fee.
-- Total spend.
-- Change amount and change address.
-- Number of inputs and estimated transaction size.
+- Change amount.
+- Number of inputs.
 - Warning that blockchain transactions cannot be reversed.
-- Confirmation checkbox or explicit confirmation action.
 
-## 6. Error handling
+## Error handling
 
 Use user-safe messages:
 
@@ -99,6 +96,7 @@ Use user-safe messages:
 - `Broadcast failed. Please verify the transaction and try again.`
 - `PEPEW Light API is temporarily unavailable.`
 - `Transaction rejected by the network.`
+- `Waiting for wallet UTXOs to update...`
 
 Do not expose:
 
@@ -108,7 +106,7 @@ Do not expose:
 - Backend filesystem paths.
 - Stack traces.
 
-## 7. Test checklist
+## Test checklist
 
 Backend tests:
 
@@ -117,6 +115,8 @@ Backend tests:
 - Reject non-hex payload.
 - Reject odd-length hex.
 - Reject oversized payload.
+- Reject extra payload fields.
+- Reject mnemonic/private-key/WIF/seed fields.
 - Return safe error shape.
 - Apply rate limits.
 
@@ -124,10 +124,10 @@ Client tests:
 
 - Mnemonic/private key is never sent to API.
 - Broadcast request contains only signed raw transaction payload.
-- Confirmation screen displays amount, fee, total spend, and change.
 - Failed broadcast shows a safe user-facing error.
+- Consecutive sends recover after short API/indexer delay.
 - Mobile layout remains readable.
 
-## 8. Implementation rule
+## Implementation rule
 
 Do not add mnemonic, private key, WIF, seed derivation, or signing logic to `pepepow-electrumx-service`. Those functions belong only in the client-side wallet code.
