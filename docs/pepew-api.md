@@ -2,7 +2,7 @@
 
 PEPEW Light Wallet integrates with the PEPEW Light API served by `pepepow-electrumx-service`.
 
-This document is the public API contract for wallet and application developers. It intentionally covers only the current PEPEW Light / ElectrumX gateway flow. Legacy `pepepow-wallet-suite` service documents, trading bots, Telegram control-plane APIs, and standalone wallet-server concepts are out of scope for this repository.
+This document is the public API contract for wallet and application developers. It covers the current PEPEW Light / ElectrumX gateway flow only.
 
 ## Base URL
 
@@ -102,6 +102,7 @@ Regex preflight:
 Rules:
 
 - JSON field name: `raw_tx`
+- request body must contain only `raw_tx`
 - hex string only
 - optional `0x` prefix may be stripped by the backend
 - even number of hex characters
@@ -129,7 +130,7 @@ Purpose:
 - validate address
 - return confirmed/unconfirmed balance
 - return compact recent history
-- expose read-only ElectrumX-backed wallet state
+- expose ElectrumX-backed wallet state
 
 Response example:
 
@@ -308,9 +309,9 @@ Successful response example:
 Rules:
 
 - this endpoint may only receive signed raw transaction hex
+- request body must contain only `raw_tx`
 - backend must not sign transactions
 - backend must not receive mnemonic or private keys
-- frontend must show recipient, amount, fee, change, and final tx summary before signing and broadcast
 - failed broadcast may mean stale UTXO, insufficient fee, invalid signature, already-spent input, mempool rejection, or temporary upstream failure
 
 ## Payment check endpoint
@@ -385,15 +386,13 @@ Payment statuses:
 Recommended non-custodial send flow:
 
 1. Client derives the sender address locally from mnemonic/private key.
-2. Client calls `GET /api/wallet/utxo/{address}?fresh=1`.
+2. Client calls `GET /api/wallet/utxo/{address}?fresh=1` or same-origin UTXO lookup.
 3. Client selects UTXOs locally.
 4. Client estimates the transaction size and fee locally.
-5. Client constructs unsigned transaction locally.
-6. Client displays recipient, amount, fee, selected inputs, and change output to the user.
-7. Client signs locally.
-8. Client serializes signed raw transaction hex.
-9. Client calls `POST /api/wallet/broadcast` with only `{ "raw_tx": "..." }`.
-10. Client displays returned txid and refreshes history after a short delay.
+5. Client constructs and signs the transaction locally.
+6. Client serializes signed raw transaction hex.
+7. Client calls `POST /api/wallet/broadcast` with only `{ "raw_tx": "..." }`.
+8. Client displays returned txid and refreshes history after a short delay.
 
 Important implementation notes:
 
@@ -401,7 +400,7 @@ Important implementation notes:
 - Refresh UTXOs before signing to reduce stale-input failures.
 - Re-check the change address belongs to the local wallet before signing.
 - Treat broadcast errors as non-final until the tx is looked up by txid or the wallet refreshes UTXOs/history.
-- Keep broadcast disabled in UI until the transaction review and signing flow is complete.
+- Consecutive sends may require short UTXO/indexer retry.
 
 ## Error response format
 
@@ -430,6 +429,7 @@ Error codes:
 | 400 | `invalid_confirmations` | confirmations value is negative | ask user to use zero or greater |
 | 400 | `invalid_expiry` | expiry is not valid ISO8601 or positive seconds | ask user to fix expiry |
 | 400 | `invalid_raw_tx` | signed raw tx is not valid hex | block broadcast and show error |
+| 400 | `invalid_broadcast_payload` | broadcast body has unsupported fields | block broadcast |
 | 400 | `raw_tx_too_short` | raw tx is too short | block broadcast |
 | 400 | `raw_tx_too_large` | raw tx exceeds maximum size | block broadcast |
 | 404 | `tx_not_found` | transaction not found | show not found; allow retry |
@@ -482,7 +482,7 @@ curl -s https://light.pepepow.net/api/wallet/utxo/PRfbEeHAKKbz6Voz85WJudrJwTA3Zb
 curl -s "https://light.pepepow.net/api/payment/check?address=PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb&amount=1&confirmations=1&expires_in=900"
 ```
 
-Broadcast smoke test must not use a fake transaction on production. Use only a real signed transaction created by the client wallet, and only after send-flow review is complete.
+Broadcast smoke test must use only a real signed transaction created by the client wallet.
 
 ## Production use disclaimer
 
@@ -493,4 +493,4 @@ PEPEW Light API and PEPEW Light Wallet are public beta infrastructure for PEPEPO
 - Public endpoints may be rate-limited, cached, restarted, or temporarily unavailable.
 - API responses are intended for wallet display and application integration, not as a sole accounting or exchange-grade settlement source.
 - Applications that accept payments should independently define confirmation requirements, expiry behavior, overpayment handling, and retry logic.
-- Broadcast support accepts only signed raw transactions and may remain disabled in the UI until the transaction flow is fully reviewed.
+- Broadcast support accepts only signed raw transactions.
