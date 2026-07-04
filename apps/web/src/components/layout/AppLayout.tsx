@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { useEffect } from "react";
-import { useTranslation } from "react-i18next";
 import Header from "./Header";
 import Footer from "./Footer";
 
@@ -10,7 +9,6 @@ interface AppLayoutProps {
 }
 
 export default function AppLayout({ children, compact }: AppLayoutProps) {
-  const { t } = useTranslation();
   const telegramWebApp = typeof window !== "undefined"
     ? (window as any)?.Telegram?.WebApp
     : undefined;
@@ -29,11 +27,6 @@ export default function AppLayout({ children, compact }: AppLayoutProps) {
       <Header compact={isCompact} />
       <main className="app-main">
         <div className={`container app-content${isCompact ? " compact" : ""}`}>
-          <div className="wallet-home-link-bar">
-            <a className="btn secondary" href="https://light.pepepow.net/">
-              ← {t("nav.backToLight", { defaultValue: "Back to PEPEW Light" })}
-            </a>
-          </div>
           {children}
         </div>
       </main>
