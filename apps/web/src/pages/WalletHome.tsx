@@ -21,9 +21,20 @@ function normalizeMnemonicInput(value: string) {
 function formatAddressError(error: string | null, t: any) {
   if (!error) return null;
   if (/unsupported_address_prefix|invalid_address|bad_checksum|address_too_short|address_too_long/i.test(error)) {
-    return t("wallet.errors.invalidAddress");
+    return t("wallet.errors.invalidAddress", { defaultValue: "Invalid PEPEW address." });
   }
-  return error;
+  if (/timeout|timed out|abort/i.test(error)) {
+    return t("wallet.errors.timeout", { defaultValue: "The PEPEW Light API request timed out. Please try again." });
+  }
+  if (/network|failed to fetch|unreachable|connection/i.test(error)) {
+    return t("wallet.errors.apiUnavailable", { defaultValue: "The PEPEW Light API is temporarily unavailable." });
+  }
+  return t("wallet.errors.dataUnavailable", { defaultValue: "Unable to load wallet data. Please try again later." });
+}
+
+function formatWordCount(wordCount: number) {
+  if (!wordCount) return "0 words";
+  return `${wordCount} ${wordCount === 1 ? "word" : "words"}`;
 }
 
 export default function WalletHome() {
@@ -46,6 +57,7 @@ export default function WalletHome() {
   const mnemonicValid = (mnemonicWordCount === 12 || mnemonicWordCount === 24)
     && validateMnemonic(normalizedMnemonic);
   const showMnemonicHint = mnemo.trim().length > 0 && !mnemonicValid;
+  const hasZeroConfirmedBalance = lightBalance && Number(lightBalance.confirmed) === 0 && Number(lightBalance.unconfirmed) === 0;
 
   useEffect(() => {
     const trimmed = address.trim();
@@ -81,7 +93,7 @@ export default function WalletHome() {
     return () => {
       active = false;
     };
-  }, [address]);
+  }, [address, t]);
 
   const createWallet = async () => {
     setWalletError(null);
@@ -148,25 +160,38 @@ export default function WalletHome() {
     <AppLayout>
       <PageCard title={t("title")}>
         <div className="card" style={{ border: "1px solid rgba(0, 150, 255, 0.45)", marginBottom: 12 }}>
-          <div className="section-title" style={{ color: "rgba(0, 150, 255, 1)" }}>{t("wallet.beta.title")}</div>
-          <div className="muted" style={{ marginTop: 6, lineHeight: 1.55, fontSize: "0.9rem" }}>
-            <div>{t("wallet.beta.description")}</div>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div>
+              <div className="section-title" style={{ color: "rgba(0, 150, 255, 1)" }}>{t("wallet.beta.title")}</div>
+              <div className="muted" style={{ marginTop: 6, lineHeight: 1.55, fontSize: "0.9rem" }}>
+                <div>{t("wallet.beta.description")}</div>
+                <div>{t("wallet.beta.readOnly")}</div>
+              </div>
+            </div>
+            <a className="btn secondary small" href="https://light.pepepow.net/" style={{ textDecoration: "none" }}>
+              {t("nav.backToLight", { defaultValue: "Back to PEPEW Light" })}
+            </a>
           </div>
         </div>
 
         <div className="card" style={{ border: "1px solid rgba(255, 170, 0, 0.45)", marginBottom: 12 }}>
           <div className="section-title" style={{ color: "rgba(255, 170, 0, 1)" }}>{t("wallet.security.title")}</div>
           <div className="muted" style={{ marginTop: 6, lineHeight: 1.55, fontSize: "0.9rem", display: "flex", flexDirection: "column", gap: "4px" }}>
+            <div>• {t("wallet.security.nonCustodial")}</div>
             <div>• {t("wallet.security.mnemonicLocal")}</div>
             <div>• {t("wallet.security.serverNeverReceives")}</div>
             <div>• {t("wallet.security.backupPhrase")}</div>
             <div>• {t("wallet.security.apiCannotRecover")}</div>
             <div>• {t("wallet.security.neverShare")}</div>
+            <div>• {t("wallet.security.smallAmount", { defaultValue: "Use small amounts first while the wallet is in public beta." })}</div>
           </div>
         </div>
 
         <div className="card">
           <div className="section-title">{t("home.localWallet")}</div>
+          <div className="muted" style={{ marginTop: 6, fontSize: "0.9rem", lineHeight: 1.5 }}>
+            {t("wallet.security.browserStorage", { defaultValue: "Mnemonic handling is browser-only. Clear this wallet on shared devices and never paste your recovery phrase into server forms or support chats." })}
+          </div>
           
           <label className="row" style={{ marginTop: 10, marginBottom: 10, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
             <input
@@ -205,9 +230,14 @@ export default function WalletHome() {
               if (normalized && normalized !== mnemo) setMnemo(normalized);
             }}
             placeholder={t("home.mnemonicPlaceholder")}
+            autoComplete="off"
+            spellCheck={false}
           />
+          <div className="muted" style={{ marginTop: 6, fontSize: "0.85rem" }}>
+            {t("wallet.security.wordCount", { defaultValue: "Mnemonic word count" })}: {formatWordCount(mnemonicWordCount)} · {t("home.mnemonicHint")}
+          </div>
           {showMnemonicHint && (
-            <div className="muted" style={{ marginTop: 6 }}>
+            <div className="error" style={{ marginTop: 6 }}>
               {t("home.mnemonicHint")}
             </div>
           )}
@@ -227,7 +257,7 @@ export default function WalletHome() {
           </div>
         </div>
 
-        {address && (
+        {address ? (
           <div className="grid two">
             <div className="card">
               <div className="section-title">{t("wallet.balance.title")}</div>
@@ -235,9 +265,14 @@ export default function WalletHome() {
                 <div className="muted" style={{ marginTop: 6 }}>{t("wallet.balance.loading")}</div>
               ) : lightBalance ? (
                 <>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 700, marginTop: 6 }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 700, marginTop: 6, wordBreak: "break-word" }}>
                     {fmtPEPEWFromSats(lightBalance.confirmed, { decimals: 4 })}
                   </div>
+                  {hasZeroConfirmedBalance && (
+                    <div className="muted" style={{ marginTop: 6, fontSize: "0.9rem" }}>
+                      {t("wallet.balance.zero", { defaultValue: "This address has no confirmed balance yet." })}
+                    </div>
+                  )}
                   {Number(lightBalance.unconfirmed) > 0 && (
                     <div className="muted" style={{ marginTop: 4, fontSize: "1rem" }}>
                       {t("wallet.history.unconfirmed")}: {fmtPEPEWFromSats(lightBalance.unconfirmed, { decimals: 4 })}
@@ -251,7 +286,7 @@ export default function WalletHome() {
                 </>
               ) : (
                 <div className="error" style={{ marginTop: 6 }}>
-                  {lightBalanceError || t("wallet.balance.empty")}
+                  {lightBalanceError || t("wallet.errors.dataUnavailable", { defaultValue: "Unable to load wallet data. Please try again later." })}
                 </div>
               )}
             </div>
@@ -259,6 +294,13 @@ export default function WalletHome() {
               <div className="section-title">{t("receive")}</div>
               <code style={{ wordBreak: "break-all" }}>{address}</code>
               {qr && <div style={{ marginTop: 12 }}><img alt="qr" src={qr} className="qr" /></div>}
+            </div>
+          </div>
+        ) : (
+          <div className="card">
+            <div className="section-title">{t("wallet.balance.title")}</div>
+            <div className="muted" style={{ marginTop: 6 }}>
+              {t("wallet.emptyState", { defaultValue: "Create or import a wallet, or paste a PEPEW address, to view balance and history." })}
             </div>
           </div>
         )}
