@@ -1,13 +1,19 @@
 # Deployment Layout
 
-PEPEW Light Wallet should be deployed as static files. The backend API belongs to `pepepow-electrumx-service`.
+PEPEW Light Wallet is deployed as static files under:
 
-## Recommended production layout
+```text
+https://light.pepepow.net/wallet/
+```
+
+The backend API belongs to `pepepow-electrumx-service`.
+
+## Production layout
 
 ```text
 /home/ubuntu/pepepow-light-wallet/        source checkout
 /home/ubuntu/pepepow-electrumx-service/   FastAPI gateway checkout
-/var/www/pepew-light-wallet/              deployed static wallet files
+/var/www/pepew-light/wallet/              deployed wallet static files
 ```
 
 Public routing:
@@ -22,8 +28,9 @@ https://light.pepepow.net/api/*     FastAPI gateway
 
 ```bash
 cd /home/ubuntu/pepepow-light-wallet
-git pull
-npm install
+git pull origin main
+export PATH="/home/ubuntu/node-dist/bin:$PATH"
+rm -rf apps/web/dist
 npm run build
 ```
 
@@ -33,50 +40,48 @@ The wallet build output is:
 apps/web/dist/
 ```
 
-`apps/web/vite.config.ts` uses:
+`apps/web/vite.config.ts` must keep:
 
 ```ts
 base: "/wallet/"
 ```
 
-This is required for static assets to resolve correctly under `https://light.pepepow.net/wallet/`.
-
 ## Deploy static files
 
-Example:
-
 ```bash
-sudo mkdir -p /var/www/pepew-light-wallet
-sudo rsync -a --delete apps/web/dist/ /var/www/pepew-light-wallet/
+sudo mkdir -p /var/www/pepew-light/wallet
+sudo rsync -a --delete apps/web/dist/ /var/www/pepew-light/wallet/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-## Nginx requirements
+## Nginx path rule
 
-Nginx should:
+Production uses:
 
-- serve `/wallet/` from the static wallet build
-- apply SPA fallback for wallet subroutes
-- proxy `/api/*` to the local FastAPI gateway
-- keep ElectrumX inaccessible from the public internet
-- apply static cache headers for built assets
-- apply rate limiting for API routes
-
-Shape:
-
-```nginx
-location /wallet/ {
-    alias /var/www/pepew-light-wallet/;
-    try_files $uri $uri/ /wallet/index.html;
-}
-
-location /api/ {
-    proxy_pass http://127.0.0.1:8088/api/;
-}
+```text
+root /var/www/pepew-light
 ```
 
-Adjust the final production config to match the existing `pepepow-electrumx-service/deploy/nginx` configuration.
+So this public path:
+
+```text
+/wallet/index.html
+```
+
+maps to this file:
+
+```text
+/var/www/pepew-light/wallet/index.html
+```
+
+Do not deploy active production wallet files to:
+
+```text
+/var/www/pepepow-light-wallet/
+```
+
+unless Nginx is changed first.
 
 ## Smoke tests
 
@@ -93,10 +98,9 @@ Browser checks:
 - Logo and bundled assets load from `/wallet/assets/...`.
 - Import mnemonic flow is local and shows safety warning.
 - Balance and history display from PEPEW Light API.
+- Send submits only signed raw tx to `/api/wallet/broadcast`.
 - Invalid address and API unavailable states show friendly messages.
 
 ## Rollback
 
 Because deployment is static, rollback can be as simple as restoring the previous `dist` copy or redeploying a previous Git commit.
-
-Do not rollback the wallet by changing backend API behavior unless the wallet/API contract changed.
