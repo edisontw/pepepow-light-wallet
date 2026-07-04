@@ -2,13 +2,11 @@
 
 PEPEW Light Wallet is a client-side web wallet for PEPEPOW / PEPEW. The current public target is a static Vite/React wallet served from `/wallet/` and integrated with the PEPEW Light ElectrumX gateway.
 
-This repository is not the old `pepepow-wallet-suite`. It does not own trading bots, exchange automation, Telegram control-plane services, or the FastAPI gateway.
-
 ## Design goals
 
 - Keep the wallet non-custodial.
 - Keep all wallet secret handling in the browser/client.
-- Use PEPEW Light API for address, history, UTXO, transaction, and future signed-broadcast calls.
+- Use PEPEW Light API for address, history, UTXO, transaction, and signed-broadcast calls.
 - Keep ElectrumX and PEPEPOWd private behind the backend gateway.
 - Build a lightweight wallet suitable for an Oracle Cloud single-core / 6 GB host when served with the existing node, ElectrumX, API, and static files.
 
@@ -20,8 +18,8 @@ Browser
     - import mnemonic
     - derive addresses locally
     - display balance, history, receive QR
-    - construct/sign transactions locally in future send flow
-    - submit only signed raw tx when broadcast is enabled
+    - construct/sign transactions locally
+    - submit only signed raw tx
         |
         | HTTPS /api/wallet/*
         v
@@ -54,6 +52,7 @@ Responsibilities:
 - balance display
 - transaction history display
 - receive address and QR display
+- send page and signed raw tx broadcast flow
 - PEPEW Light API status/error display
 - static build under `/wallet/`
 
@@ -64,7 +63,7 @@ Shared client-side wallet helpers.
 Responsibilities:
 
 - PEPEPOW address and derivation helpers
-- transaction construction/signing helpers when send flow is enabled
+- transaction construction/signing helpers
 - unit-testable wallet primitives
 
 This package must remain frontend/client-side wallet logic. Do not add backend service behavior here.
@@ -90,10 +89,10 @@ Production defaults to same-origin calls. `VITE_PEPEW_LIGHT_API_BASE_URL` is onl
 | Repository | Responsibility |
 | --- | --- |
 | `pepepow-light-wallet` | Static web wallet and client-side wallet logic |
-| `pepepow-electrumx-service` | FastAPI gateway, API cache, status pages, wallet read API, signed-tx broadcast endpoint |
+| `pepepow-electrumx-service` | FastAPI gateway, API cache, status pages, wallet API, signed-tx broadcast endpoint |
 | `electrumx-pepepow` | ElectrumX chain support only |
 
-Do not mix backend mnemonic handling, private-key custody, or signing services into `pepepow-electrumx-service`.
+Do not add wallet custody or server-side signing behavior to the backend gateway.
 
 ## Data allowed to cross the API boundary
 
@@ -102,7 +101,7 @@ Allowed:
 - public address
 - txid
 - read query parameters
-- signed raw transaction after send flow is reviewed
+- signed raw transaction
 
 Not allowed:
 
@@ -119,7 +118,7 @@ npm install
 npm run build
 ```
 
-Deploy `apps/web/dist` to the PEPEW Light host and serve it under `/wallet/`. Nginx should provide SPA fallback for wallet routes while keeping `/api/*` proxied to FastAPI.
+Deploy `apps/web/dist` to `/var/www/pepew-light/wallet/` and serve it under `/wallet/`. Nginx should provide SPA fallback for wallet routes while keeping `/api/*` proxied to FastAPI.
 
 ## Current phase checklist
 
@@ -129,5 +128,5 @@ Deploy `apps/web/dist` to the PEPEW Light host and serve it under `/wallet/`. Ng
 - Wallet shows non-custodial warning before or during import.
 - Wallet can show balance and history from PEPEW Light API.
 - Receive address and QR display correctly.
+- Send can submit signed raw tx only.
 - API errors are user-facing and do not expose internals.
-- Broadcast remains signed-raw-transaction only.
