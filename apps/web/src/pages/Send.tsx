@@ -18,6 +18,10 @@ const SPENT_OUTPOINTS_KEY = "pepew_recent_spent_outpoints";
 // Keep local anti-double-spend markers long enough for the API/indexer to stop returning spent outputs.
 const SPENT_OUTPOINT_TTL_MS = 10 * 60 * 1000;
 const MAX_RECENT_SPENT_OUTPOINTS = 2000;
+const UTXO_RETRY_ATTEMPTS = 5;
+const UTXO_RETRY_DELAY_MS = 1200;
+const PREV_TX_RETRY_ATTEMPTS = 4;
+const PREV_TX_RETRY_DELAY_MS = 1200;
 
 type SendPhase = "idle" | "loading_utxos" | "fetching_prevtx" | "signing" | "broadcasting" | "broadcasted" | "error";
 
@@ -41,6 +45,10 @@ type SendPreview = {
   feeAtomic: bigint;
   changeAtomic: bigint;
 };
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function normalizeAddressInput(value: string) {
   if (!value) return "";
@@ -176,9 +184,28 @@ function toWalletCoreUtxo(utxo: LightUtxo, rawTx: string): UTXO {
   };
 }
 
-async function fetchCoreUtxosWithLimit(selectedLight: LightUtxo[]): Promise<UTXO[]> {
+async function fetchCoreUtxosWithLimit(selectedLight: LightUtxo[], onRetry?: (attempt: number) => void): Promise<UTXO[]> {
   const results: UTXO[] = new Array(selectedLight.length);
   let nextIndex = 0;
+
+  async function fetchRawTxWithRetry(item: LightUtxo) {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= PREV_TX_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        const tx = await pepewLightClient.getTx(item.txid, true);
+        const rawTx = extractRawTx(tx);
+        if (rawTx) return rawTx;
+        lastError = new Error(`Previous transaction raw hex unavailable for ${item.txid}.`);
+      } catch (e) {
+        lastError = e;
+      }
+      if (attempt < PREV_TX_RETRY_ATTEMPTS) {
+        onRetry?.(attempt + 1);
+        await sleep(PREV_TX_RETRY_DELAY_MS);
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(`Previous transaction raw hex unavailable for ${item.txid}.`);
+  }
 
   async function worker() {
     while (nextIndex < selectedLight.length) {
@@ -186,9 +213,7 @@ async function fetchCoreUtxosWithLimit(selectedLight: LightUtxo[]): Promise<UTXO
       nextIndex += 1;
 
       const item = selectedLight[index];
-      const tx = await pepewLightClient.getTx(item.txid, true);
-      const rawTx = extractRawTx(tx);
-      if (!rawTx) throw new Error(`Previous transaction raw hex unavailable for ${item.txid}.`);
+      const rawTx = await fetchRawTxWithRetry(item);
       results[index] = toWalletCoreUtxo(item, rawTx);
     }
   }
@@ -302,6 +327,14 @@ export default function Send() {
     setSpentOutpoints(next);
   };
 
+  const loadSpendableSnapshot = async () => {
+    const utxoResult = await pepewLightClient.getUtxo(fromAddress);
+    const latestSpent = reconcileRecentSpentOutpoints(utxoResult.utxos);
+    const spendable = spendableUtxos(utxoResult.utxos, latestSpent);
+    const spendableTotal = spendable.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
+    return { latestSpent, spendable, spendableTotal };
+  };
+
   const buildSignedTx = async () => {
     if (validationError || !recipientAmountAtomic || !feeAtomic || !totalSpentAtomic) {
       setError(validationError || "Invalid send form.");
@@ -314,13 +347,19 @@ export default function Send() {
 
     try {
       setPhase("loading_utxos");
-      const utxoResult = await pepewLightClient.getUtxo(fromAddress);
-      const latestSpent = reconcileRecentSpentOutpoints(utxoResult.utxos);
-      setSpentOutpoints(latestSpent);
+      let snapshot = await loadSpendableSnapshot();
+      setSpentOutpoints(snapshot.latestSpent);
 
-      const spendable = spendableUtxos(utxoResult.utxos, latestSpent);
-      const spendableTotal = spendable.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
-      const unconfirmedCount = spendable.filter((u) => Number(u.height) <= 0).length;
+      for (let attempt = 0; snapshot.spendableTotal < totalSpentAtomic && attempt < UTXO_RETRY_ATTEMPTS; attempt += 1) {
+        setError(`Waiting for wallet UTXOs to update... retry ${attempt + 1}/${UTXO_RETRY_ATTEMPTS}`);
+        await sleep(UTXO_RETRY_DELAY_MS);
+        snapshot = await loadSpendableSnapshot();
+        setSpentOutpoints(snapshot.latestSpent);
+      }
+      setError(null);
+
+      const spendable = snapshot.spendable;
+      const spendableTotal = snapshot.spendableTotal;
 
       if (!spendable.length) {
         throw new Error("No spendable UTXOs are available yet. Press Refresh UTXOs or wait for the latest transaction to be indexed.");
@@ -345,7 +384,10 @@ export default function Send() {
       const changeAtomic = selectedTotalAtomic - totalSpentAtomic;
 
       setPhase("fetching_prevtx");
-      const coreUtxos = await fetchCoreUtxosWithLimit(selectedLight);
+      const coreUtxos = await fetchCoreUtxosWithLimit(selectedLight, (attempt) => {
+        setError(`Waiting for previous transaction data... retry ${attempt}/${PREV_TX_RETRY_ATTEMPTS}`);
+      });
+      setError(null);
 
       setPhase("signing");
       const wif = await wifFromMnemonic(mnemonic, DEFAULT_PATH, PEPEPOW);
@@ -389,7 +431,7 @@ export default function Send() {
       setBroadcastTxid(result.txid || null);
       setRecentRecipients(saveRecentRecipient(normalizedTo));
       setPhase("broadcasted");
-      void refreshBalance();
+      setTimeout(() => void refreshBalance(), 1200);
     } catch (e: any) {
       setError(safeError(e, "Broadcast failed."));
       setPhase("error");
