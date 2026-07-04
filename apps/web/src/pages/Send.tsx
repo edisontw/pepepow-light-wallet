@@ -12,21 +12,14 @@ const DEFAULT_FEE = "0.0001";
 const DUST_ATOMIC = 546n;
 const MAX_INPUTS = 150;
 const PREV_TX_FETCH_CONCURRENCY = 6;
-const CONSOLIDATION_INPUT_LIMIT = 150;
-const AUTO_CONSOLIDATION_ROUNDS = 3;
 const RECENT_RECIPIENTS_KEY = "pepew_recent_recipients";
 const MAX_RECENT_RECIPIENTS = 8;
 const SPENT_OUTPOINTS_KEY = "pepew_recent_spent_outpoints";
-// Short anti-double-click guard only. Fresh UTXO lookups are the source of truth for later sends.
-const SPENT_OUTPOINT_TTL_MS = 30 * 1000;
+// Keep local anti-double-spend markers long enough for the API/indexer to stop returning spent outputs.
+const SPENT_OUTPOINT_TTL_MS = 10 * 60 * 1000;
 const MAX_RECENT_SPENT_OUTPOINTS = 2000;
 
-type SendPhase = "idle" | "loading_utxos" | "fetching_prevtx" | "signing" | "ready" | "broadcasting" | "broadcasted" | "error";
-
-type SignedPreview = {
-  rawTx: string;
-  spentOutpoints: string[];
-};
+type SendPhase = "idle" | "loading_utxos" | "fetching_prevtx" | "signing" | "broadcasting" | "broadcasted" | "error";
 
 type RecentRecipient = {
   address: string;
@@ -36,6 +29,17 @@ type RecentRecipient = {
 type SpentOutpointRecord = {
   key: string;
   expiresAt: number;
+};
+
+type SendPreview = {
+  rawTx: string;
+  spentOutpoints: string[];
+  selectedInputCount: number;
+  selectedUnconfirmedCount: number;
+  selectedTotalAtomic: bigint;
+  recipientAmountAtomic: bigint;
+  feeAtomic: bigint;
+  changeAtomic: bigint;
 };
 
 function normalizeAddressInput(value: string) {
@@ -58,6 +62,14 @@ function parseAtomicInput(value: string) {
 
 function atomicFromUtxoValue(value: number) {
   return BigInt(Math.max(0, Math.trunc(Number(value))));
+}
+
+function formatAtomicAsPepew(value: bigint) {
+  const sign = value < 0n ? "-" : "";
+  const abs = value < 0n ? -value : value;
+  const whole = abs / 100000000n;
+  const frac = (abs % 100000000n).toString().padStart(8, "0").replace(/0+$/, "");
+  return `${sign}${whole.toString()}${frac ? `.${frac}` : ""}`;
 }
 
 function shortAddress(value: string) {
@@ -104,15 +116,6 @@ function saveRecentSpentOutpoints(keys: string[]) {
   }
 }
 
-function clearRecentSpentOutpoints() {
-  try {
-    localStorage.removeItem(SPENT_OUTPOINTS_KEY);
-  } catch {
-    // ignore storage failures
-  }
-  return new Set<string>();
-}
-
 function reconcileRecentSpentOutpoints(utxos: LightUtxo[]) {
   try {
     const now = Date.now();
@@ -133,8 +136,15 @@ function reconcileRecentSpentOutpoints(utxos: LightUtxo[]) {
   }
 }
 
-function spendableConfirmedUtxos(utxos: LightUtxo[], excludedOutpoints: Set<string>) {
-  return utxos.filter((u) => Number(u.height) > 0 && Number(u.value) > 0 && !excludedOutpoints.has(outpointKey(u)));
+function spendableUtxos(utxos: LightUtxo[], excludedOutpoints: Set<string>) {
+  return utxos
+    .filter((u) => Number(u.value) > 0 && !excludedOutpoints.has(outpointKey(u)))
+    .sort((a, b) => {
+      const aConfirmed = Number(a.height) > 0 ? 1 : 0;
+      const bConfirmed = Number(b.height) > 0 ? 1 : 0;
+      if (aConfirmed !== bConfirmed) return bConfirmed - aConfirmed;
+      return Number(a.value) - Number(b.value);
+    });
 }
 
 function extractRawTx(payload: any): string | null {
@@ -147,12 +157,14 @@ function extractRawTx(payload: any): string | null {
   return null;
 }
 
-function formatAddressError(error: string | null) {
-  if (!error) return null;
-  if (/unsupported_address_prefix|invalid_address|bad_checksum|address_too_short|address_too_long/i.test(error)) {
-    return "Invalid PEPEW address.";
-  }
-  return error;
+function safeError(error: any, fallback: string) {
+  const raw = String(error?.message || error || "");
+  if (/unsupported_address_prefix|invalid_address|bad_checksum|address_too_short|address_too_long/i.test(raw)) return "Invalid PEPEW address.";
+  if (/insufficient|not enough/i.test(raw)) return raw;
+  if (/timeout|timed out/i.test(raw)) return "PEPEW Light API request timed out. Please try again.";
+  if (/already spent|missing inputs|txn-mempool-conflict|bad-txns-inputs/i.test(raw)) return "One or more selected UTXOs were already spent or not yet indexed. Press Refresh UTXOs and try again.";
+  if (/raw hex unavailable/i.test(raw)) return "Previous transaction data is not available yet. Press Refresh UTXOs or wait for the API to index the latest transaction.";
+  return fallback;
 }
 
 function toWalletCoreUtxo(utxo: LightUtxo, rawTx: string): UTXO {
@@ -227,12 +239,9 @@ export default function Send() {
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [phase, setPhase] = useState<SendPhase>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [signedPreview, setSignedPreview] = useState<SignedPreview | null>(null);
+  const [preview, setPreview] = useState<SendPreview | null>(null);
   const [broadcastTxid, setBroadcastTxid] = useState<string | null>(null);
   const [attemptedSend, setAttemptedSend] = useState(false);
-  const [consolidationError, setConsolidationError] = useState<string | null>(null);
-  const [consolidationStatus, setConsolidationStatus] = useState<string | null>(null);
-  const [consolidationTxids, setConsolidationTxids] = useState<string[]>([]);
   const [spentOutpoints, setSpentOutpoints] = useState<Set<string>>(() => loadRecentSpentOutpoints());
 
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
@@ -246,10 +255,6 @@ export default function Send() {
     if (!amountAtomic || !feeAtomic) return null;
     return subtractFee ? amountAtomic : amountAtomic + feeAtomic;
   }, [amountAtomic, feeAtomic, subtractFee]);
-  const confirmedAtomic = useMemo(() => {
-    const n = BigInt(Math.max(0, Math.trunc(Number(balance?.confirmed ?? 0))));
-    return n;
-  }, [balance]);
 
   const validationError = useMemo(() => {
     if (!fromAddress) return "Create or import a wallet before sending.";
@@ -259,13 +264,37 @@ export default function Send() {
     if (!feeAtomic) return "Enter a valid fee.";
     if (!recipientAmountAtomic || recipientAmountAtomic <= DUST_ATOMIC) return "Recipient amount is below the dust threshold after fee.";
     if (!totalSpentAtomic || totalSpentAtomic <= 0n) return "Total spent amount is invalid.";
-    if (confirmedAtomic > 0n && totalSpentAtomic > confirmedAtomic) {
-      return "Amount and fee are greater than the confirmed balance.";
-    }
     return null;
-  }, [fromAddress, mnemonic, normalizedTo, amountAtomic, feeAtomic, recipientAmountAtomic, totalSpentAtomic, confirmedAtomic]);
+  }, [fromAddress, mnemonic, normalizedTo, amountAtomic, feeAtomic, recipientAmountAtomic, totalSpentAtomic]);
 
+  const busy = phase === "loading_utxos" || phase === "fetching_prevtx" || phase === "signing" || phase === "broadcasting";
   const displayValidationError = attemptedSend ? validationError : null;
+
+  const refreshBalance = async () => {
+    if (!fromAddress) return;
+    setBalanceLoading(true);
+    setBalanceError(null);
+    try {
+      const data = await pepewLightClient.getAddress(fromAddress);
+      setBalance(data.balance);
+    } catch (e: any) {
+      setBalance(null);
+      setBalanceError(safeError(e, "PEPEW Light API balance lookup failed."));
+    } finally {
+      setBalanceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshBalance();
+  }, [fromAddress]);
+
+  useEffect(() => {
+    setPreview(null);
+    setBroadcastTxid(null);
+    setError(null);
+    if (phase !== "idle") setPhase("idle");
+  }, [to, amount, fee, subtractFee]);
 
   const markOutpointsSpent = (keys: string[]) => {
     if (!keys.length) return;
@@ -273,77 +302,31 @@ export default function Send() {
     setSpentOutpoints(next);
   };
 
-  useEffect(() => {
-    if (!fromAddress) return;
-    let active = true;
-    const run = async () => {
-      setBalanceLoading(true);
-      setBalanceError(null);
-      try {
-        const data = await pepewLightClient.getAddress(fromAddress);
-        if (!active) return;
-        setBalance(data.balance);
-      } catch (e: any) {
-        if (!active) return;
-        setBalance(null);
-        setBalanceError(formatAddressError(e?.message || "PEPEW Light API balance lookup failed."));
-      } finally {
-        if (active) setBalanceLoading(false);
-      }
-    };
-    void run();
-    return () => {
-      active = false;
-    };
-  }, [fromAddress]);
-
-  useEffect(() => {
-    setSignedPreview(null);
-    setBroadcastTxid(null);
-    setError(null);
-    if (phase !== "idle") setPhase("idle");
-  }, [to, amount, fee, subtractFee]);
-
   const buildSignedTx = async () => {
     if (validationError || !recipientAmountAtomic || !feeAtomic || !totalSpentAtomic) {
       setError(validationError || "Invalid send form.");
       return null;
     }
+
     setError(null);
-    setSignedPreview(null);
+    setPreview(null);
     setBroadcastTxid(null);
-    setConsolidationTxids([]);
 
     try {
       setPhase("loading_utxos");
       const utxoResult = await pepewLightClient.getUtxo(fromAddress);
-      let latestSpent = reconcileRecentSpentOutpoints(utxoResult.utxos);
+      const latestSpent = reconcileRecentSpentOutpoints(utxoResult.utxos);
       setSpentOutpoints(latestSpent);
-      const confirmedBeforeExclusion = utxoResult.utxos.filter((u) => Number(u.height) > 0 && Number(u.value) > 0);
-      const unconfirmedAvailable = utxoResult.utxos.some((u) => Number(u.height) <= 0 && Number(u.value) > 0);
-      let spendable = spendableConfirmedUtxos(utxoResult.utxos, latestSpent);
-      let spendableTotal = spendable.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
 
-      if (spendableTotal < totalSpentAtomic && latestSpent.size > 0) {
-        // Fresh API UTXOs are authoritative. If local recently-spent markers are the only blocker,
-        // clear them automatically so the next send does not require a full page refresh.
-        latestSpent = clearRecentSpentOutpoints();
-        setSpentOutpoints(latestSpent);
-        spendable = confirmedBeforeExclusion;
-        spendableTotal = spendable.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
-      }
+      const spendable = spendableUtxos(utxoResult.utxos, latestSpent);
+      const spendableTotal = spendable.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
+      const unconfirmedCount = spendable.filter((u) => Number(u.height) <= 0).length;
 
       if (!spendable.length) {
-        if (confirmedBeforeExclusion.length > 0) {
-          throw new Error("Previous send is still updating. The wallet is avoiding recently spent UTXOs; please wait for the next confirmed UTXO update before sending again.");
-        }
-        if (unconfirmedAvailable) {
-          throw new Error("Only unconfirmed change is currently available. For safety, normal Send uses confirmed UTXOs only. Please wait for confirmation before sending again.");
-        }
-        throw new Error("No confirmed UTXOs available for sending.");
+        throw new Error("No spendable UTXOs are available yet. Press Refresh UTXOs or wait for the latest transaction to be indexed.");
       }
       if (spendableTotal < totalSpentAtomic) {
-        throw new Error("Insufficient confirmed funds. Please wait for confirmation, press Refresh UTXOs, or reduce the amount.");
+        throw new Error("Insufficient spendable funds. The wallet may be waiting for change from a previous transaction or for the API indexer to update.");
       }
 
       const selected = selectUtxos(
@@ -351,12 +334,15 @@ export default function Send() {
         totalSpentAtomic.toString(),
       );
       if (selected.picked.length > MAX_INPUTS) {
-        throw new Error(`Too many inputs selected (${selected.picked.length}). Use Advanced consolidation first.`);
+        throw new Error(`Too many inputs selected (${selected.picked.length}). Consolidate UTXOs first.`);
       }
 
       const selectedKeys = new Set(selected.picked.map((u) => `${u.txid}:${u.vout}`));
       const selectedLight = spendable.filter((u) => selectedKeys.has(outpointKey(u)));
       const selectedOutpoints = selectedLight.map(outpointKey);
+      const selectedTotalAtomic = selectedLight.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
+      const selectedUnconfirmedCount = selectedLight.filter((u) => Number(u.height) <= 0).length;
+      const changeAtomic = selectedTotalAtomic - totalSpentAtomic;
 
       setPhase("fetching_prevtx");
       const coreUtxos = await fetchCoreUtxosWithLimit(selectedLight);
@@ -372,30 +358,40 @@ export default function Send() {
         changeAddress: fromAddress,
         fee: feeAtomic.toString(),
       });
-      const preview = { rawTx, spentOutpoints: selectedOutpoints };
-      setSignedPreview(preview);
-      setPhase("ready");
-      return preview;
+
+      const nextPreview: SendPreview = {
+        rawTx,
+        spentOutpoints: selectedOutpoints,
+        selectedInputCount: selectedLight.length,
+        selectedUnconfirmedCount,
+        selectedTotalAtomic,
+        recipientAmountAtomic,
+        feeAtomic,
+        changeAtomic,
+      };
+      setPreview(nextPreview);
+      setPhase("idle");
+      return nextPreview;
     } catch (e: any) {
-      setError(e?.message || "Failed to prepare transaction.");
+      setError(safeError(e, "Failed to prepare transaction."));
       setPhase("error");
       return null;
     }
   };
 
-  const broadcast = async (preview = signedPreview) => {
-    if (!preview) return;
+  const broadcast = async (nextPreview = preview) => {
+    if (!nextPreview) return;
     setError(null);
     setPhase("broadcasting");
     try {
-      const result = await pepewLightClient.broadcastSignedRawTx(preview.rawTx);
-      markOutpointsSpent(preview.spentOutpoints);
+      const result = await pepewLightClient.broadcastSignedRawTx(nextPreview.rawTx);
+      markOutpointsSpent(nextPreview.spentOutpoints);
       setBroadcastTxid(result.txid || null);
-      setConsolidationTxids([]);
       setRecentRecipients(saveRecentRecipient(normalizedTo));
       setPhase("broadcasted");
+      void refreshBalance();
     } catch (e: any) {
-      setError(e?.message || "Broadcast failed.");
+      setError(safeError(e, "Broadcast failed."));
       setPhase("error");
     }
   };
@@ -406,151 +402,37 @@ export default function Send() {
       setError(null);
       return;
     }
-    const preview = await buildSignedTx();
-    if (preview) await broadcast(preview);
+    const nextPreview = await buildSignedTx();
+    if (nextPreview) await broadcast(nextPreview);
   };
 
   const refreshUtxoState = async () => {
     setError(null);
-    setSignedPreview(null);
-    setSpentOutpoints(clearRecentSpentOutpoints());
+    setPreview(null);
+    setBroadcastTxid(null);
     try {
-      const data = await pepewLightClient.getAddress(fromAddress);
-      setBalance(data.balance);
+      const utxoResult = await pepewLightClient.getUtxo(fromAddress);
+      setSpentOutpoints(reconcileRecentSpentOutpoints(utxoResult.utxos));
     } catch {
-      // Keep the current balance display if refresh fails.
+      setSpentOutpoints(loadRecentSpentOutpoints());
     }
+    await refreshBalance();
     if (phase === "error") setPhase("idle");
   };
 
   const handleSendAnother = () => {
     setTo("");
     setAmount("");
-    setSignedPreview(null);
+    setPreview(null);
     setBroadcastTxid(null);
-    setConsolidationTxids([]);
-    setConsolidationStatus(null);
-    setConsolidationError(null);
     setError(null);
     setAttemptedSend(false);
-    setSpentOutpoints(clearRecentSpentOutpoints());
     setPhase("idle");
   };
-
-  const signAndBroadcastConsolidationBatch = async (
-    selectedLight: LightUtxo[],
-    batchIndex: number,
-    batchTotal: number,
-    consolidateFeeAtomic: bigint,
-    wif: string,
-  ) => {
-    const totalIn = selectedLight.reduce((sum, item) => sum + atomicFromUtxoValue(item.value), 0n);
-    const consolidateAmount = totalIn - consolidateFeeAtomic;
-    if (consolidateAmount <= DUST_ATOMIC) {
-      throw new Error(`Batch ${batchIndex + 1} is too small after the network fee.`);
-    }
-
-    setConsolidationStatus(`Preparing batch ${batchIndex + 1}/${batchTotal} with ${selectedLight.length} inputs...`);
-    setPhase("fetching_prevtx");
-    const coreUtxos = await fetchCoreUtxosWithLimit(selectedLight);
-
-    setConsolidationStatus(`Signing batch ${batchIndex + 1}/${batchTotal}...`);
-    setPhase("signing");
-    const rawTx = buildAndSignP2PKH({
-      network: PEPEPOW,
-      utxos: coreUtxos,
-      wif,
-      to: fromAddress,
-      amount: consolidateAmount.toString(),
-      changeAddress: fromAddress,
-      fee: consolidateFeeAtomic.toString(),
-    });
-
-    setConsolidationStatus(`Broadcasting batch ${batchIndex + 1}/${batchTotal}...`);
-    setPhase("broadcasting");
-    const result = await pepewLightClient.broadcastSignedRawTx(rawTx);
-    if (!result.txid) throw new Error(`Batch ${batchIndex + 1} was submitted but no txid was returned.`);
-    return { txid: result.txid, spentOutpoints: selectedLight.map(outpointKey) };
-  };
-
-  const handleConsolidate = async (auto = false) => {
-    const consolidateFeeAtomic = parseAtomicInput(DEFAULT_FEE);
-    if (!fromAddress || !mnemonic || !consolidateFeeAtomic) {
-      setConsolidationError("Import a wallet before consolidating UTXOs.");
-      return;
-    }
-    setConsolidationError(null);
-    setConsolidationStatus(null);
-    setBroadcastTxid(null);
-    setConsolidationTxids([]);
-
-    try {
-      setPhase("loading_utxos");
-      setConsolidationStatus("Loading confirmed UTXOs...");
-      const latestSpent = loadRecentSpentOutpoints();
-      setSpentOutpoints(latestSpent);
-      const utxoResult = await pepewLightClient.getUtxo(fromAddress);
-      const spendable = spendableConfirmedUtxos(utxoResult.utxos, latestSpent)
-        .sort((a, b) => Number(a.value) - Number(b.value));
-
-      if (spendable.length < 2) {
-        throw new Error("No consolidation needed. Fewer than 2 confirmed UTXOs are available after excluding recent sends.");
-      }
-
-      const batchLimit = CONSOLIDATION_INPUT_LIMIT;
-      const maxRounds = auto ? AUTO_CONSOLIDATION_ROUNDS : 1;
-      const batchTotal = Math.min(maxRounds, Math.ceil(spendable.length / batchLimit));
-      const wif = await wifFromMnemonic(mnemonic, DEFAULT_PATH, PEPEPOW);
-      const submittedTxids: string[] = [];
-
-      for (let batchIndex = 0; batchIndex < batchTotal; batchIndex += 1) {
-        const start = batchIndex * batchLimit;
-        const selectedLight = spendable.slice(start, start + batchLimit);
-        if (selectedLight.length < 2) break;
-        const result = await signAndBroadcastConsolidationBatch(
-          selectedLight,
-          batchIndex,
-          batchTotal,
-          consolidateFeeAtomic,
-          wif,
-        );
-        markOutpointsSpent(result.spentOutpoints);
-        submittedTxids.push(result.txid);
-        setConsolidationTxids([...submittedTxids]);
-      }
-
-      if (!submittedTxids.length) {
-        throw new Error("No consolidation transaction was created.");
-      }
-
-      setBroadcastTxid(null);
-      setConsolidationStatus(
-        submittedTxids.length === 1
-          ? `Consolidation submitted with ${Math.min(spendable.length, batchLimit)} inputs.`
-          : `Auto consolidation submitted ${submittedTxids.length} transactions, up to ${submittedTxids.length * batchLimit} inputs.`,
-      );
-      setPhase("broadcasted");
-    } catch (e: any) {
-      setConsolidationError(e?.message || "UTXO consolidation failed.");
-      setPhase("error");
-    }
-  };
-
-  const busy = phase === "loading_utxos" || phase === "fetching_prevtx" || phase === "signing" || phase === "broadcasting";
-  const primaryButtonLabel = phase === "broadcasting" ? "Broadcasting..." : "Send PEPEW";
-  const consolidationNeeded = balance && Number((balance as any).history_count || 0) > 50;
-  const hasBroadcastResult = Boolean(broadcastTxid) || consolidationTxids.length > 0;
 
   return (
     <AppLayout>
       <PageCard title={t("wallet.send.title")}>
-        <div className="card" style={{ border: "1px solid rgba(255, 80, 80, 0.45)", marginBottom: 12 }}>
-          <div className="section-title" style={{ color: "rgba(255, 80, 80, 1)" }}>{t("wallet.beta.title")}</div>
-          <div className="muted" style={{ marginTop: 6, lineHeight: 1.55, fontSize: "0.9rem" }}>
-            <div>{t("wallet.beta.readOnly")}</div>
-          </div>
-        </div>
-
         {!fromAddress ? (
           <div className="card">
             <p className="error">{t("wallet.send.createOrImportBeforeSending")}</p>
@@ -574,7 +456,7 @@ export default function Send() {
                 </div>
                 {spentOutpoints.size > 0 && (
                   <div className="muted" style={{ marginTop: 6 }}>
-                    Excluding {spentOutpoints.size} recently spent UTXO{spentOutpoints.size === 1 ? "" : "s"} while the network updates. Normal Send remains confirmed-only.
+                    Avoiding {spentOutpoints.size} recently spent UTXO{spentOutpoints.size === 1 ? "" : "s"} while the API/indexer updates.
                   </div>
                 )}
               </div>
@@ -646,22 +528,34 @@ export default function Send() {
 
               {displayValidationError && <p className="error" style={{ margin: 0 }}>{displayValidationError}</p>}
               {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
-              {phase !== "idle" && phase !== "ready" && phase !== "broadcasted" && (
+              {phase !== "idle" && phase !== "broadcasted" && (
                 <p className="muted" style={{ margin: 0 }}>Status: {phase.replace(/_/g, " ")}</p>
+              )}
+
+              {preview && !broadcastTxid && phase !== "broadcasting" && (
+                <div className="card" style={{ boxShadow: "none", border: "1px dashed var(--border)", marginBottom: 0 }}>
+                  <div className="section-title">Transaction preview</div>
+                  <div className="muted" style={{ marginTop: 8, display: "grid", gap: 4 }}>
+                    <div>Inputs: {preview.selectedInputCount}{preview.selectedUnconfirmedCount ? ` (${preview.selectedUnconfirmedCount} unconfirmed change)` : ""}</div>
+                    <div>Recipient receives: {formatAtomicAsPepew(preview.recipientAmountAtomic)} PEPEW</div>
+                    <div>Network fee: {formatAtomicAsPepew(preview.feeAtomic)} PEPEW</div>
+                    <div>Change: {formatAtomicAsPepew(preview.changeAtomic)} PEPEW</div>
+                  </div>
+                </div>
               )}
 
               <div className="row" style={{ gap: 8 }}>
                 <button
                   className="btn"
                   onClick={handlePrimarySend}
-                  disabled={true}
+                  disabled={busy}
                 >
-                  {t("wallet.send.disabledBtn")}
+                  {phase === "broadcasting" ? "Broadcasting..." : "Send PEPEW"}
                 </button>
                 <button className="btn secondary" type="button" onClick={refreshUtxoState} disabled={busy}>
                   {t("wallet.send.refreshUtxos")}
                 </button>
-                {hasBroadcastResult && (
+                {broadcastTxid && (
                   <button className="btn secondary" type="button" onClick={handleSendAnother} disabled={busy}>
                     Clear for next send
                   </button>
@@ -669,62 +563,16 @@ export default function Send() {
               </div>
             </div>
 
-            <details className="details">
-              <summary>{t("wallet.send.advancedConsolidate")}</summary>
-              <div style={{ marginTop: 8 }} className="muted">
-                {t("wallet.send.consolidateDescription")}
-              </div>
-              <div style={{ marginTop: 8 }}>
-                {t("wallet.send.consolidateFeeDescription")}
-              </div>
-              {consolidationNeeded && <p className="muted">{t("wallet.send.benefitFromConsolidate")}</p>}
-              {consolidationStatus && <p className="success" style={{ marginBottom: 0 }}>{consolidationStatus}</p>}
-              {consolidationError && <p className="error" style={{ marginBottom: 0 }}>{consolidationError}</p>}
-              {consolidationTxids.length > 0 && (
-                <div style={{ marginTop: 8 }}>
-                  <div className="muted" style={{ marginBottom: 6 }}>Submitted consolidation txids</div>
-                  {consolidationTxids.map((txid, index) => (
-                    <div key={txid} style={{ marginTop: 6 }}>
-                      <span className="muted">Batch {index + 1}: </span>
-                      <code style={{ display: "inline-block", maxWidth: "100%", wordBreak: "break-all", overflowWrap: "anywhere", lineHeight: 1.4 }}>
-                        {txid}
-                      </code>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                <button
-                  className="btn secondary"
-                  type="button"
-                  onClick={() => handleConsolidate(false)}
-                  disabled={true}
-                >
-                  {t("wallet.send.consolidateDisabledBtn")}
-                </button>
-                <button
-                  className="btn secondary"
-                  type="button"
-                  onClick={() => handleConsolidate(true)}
-                  disabled={true}
-                >
-                  {t("wallet.send.autoConsolidateDisabledBtn")}
-                </button>
-              </div>
-            </details>
-
-            {hasBroadcastResult && (
+            {broadcastTxid && (
               <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div className="section-title">✅ Broadcast submitted</div>
                 <p className="success" style={{ margin: 0 }}>Transaction was submitted to PEPEW Light API.</p>
-                {broadcastTxid && (
-                  <div>
-                    <span className="muted">TxID: </span>
-                    <code style={{ display: "inline-block", maxWidth: "100%", wordBreak: "break-all", overflowWrap: "anywhere", lineHeight: 1.4 }}>
-                      {broadcastTxid}
-                    </code>
-                  </div>
-                )}
+                <div>
+                  <span className="muted">TxID: </span>
+                  <code style={{ display: "inline-block", maxWidth: "100%", wordBreak: "break-all", overflowWrap: "anywhere", lineHeight: 1.4 }}>
+                    {broadcastTxid}
+                  </code>
+                </div>
                 <div className="row" style={{ gap: 8 }}>
                   <Link className="btn secondary" to="/history" style={{ textDecoration: "none" }}>View history</Link>
                   <button className="btn secondary" type="button" onClick={handleSendAnother} disabled={busy}>Clear for next send</button>
