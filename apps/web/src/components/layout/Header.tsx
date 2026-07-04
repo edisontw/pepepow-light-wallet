@@ -70,6 +70,14 @@ export default function Header({ compact }: HeaderProps) {
           })}
         </nav>
         <div className="nav-actions">
+          <a
+            className="btn secondary small"
+            href="https://light.pepepow.net/"
+            aria-label={t("nav.backToLight", { defaultValue: "Back to PEPEW Light" })}
+          >
+            <span className="nav-label">{t("nav.backToLight", { defaultValue: "Back to PEPEW Light" })}</span>
+            <span className="nav-short">Light</span>
+          </a>
           <button
             className="btn ghost small"
             onClick={() => {
