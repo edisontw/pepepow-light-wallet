@@ -75,14 +75,6 @@ maps to this file:
 /var/www/pepew-light/wallet/index.html
 ```
 
-Do not deploy active production wallet files to:
-
-```text
-/var/www/pepepow-light-wallet/
-```
-
-unless Nginx is changed first.
-
 ## Smoke tests
 
 ```bash
