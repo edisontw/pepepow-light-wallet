@@ -10,6 +10,25 @@ const INITIAL_HISTORY_LIMIT = 10;
 const SHOW_MORE_STEP = 25;
 const HISTORY_FETCH_THROTTLE_MS = 15000;
 
+const SAFE_ERROR_PATTERNS = [
+  {
+    pattern: /unsupported_address_prefix|invalid_address|bad_checksum|address_too_short|address_too_long/i,
+    message: "Invalid PEPEW address.",
+  },
+  {
+    pattern: /timeout|timed out|abort/i,
+    message: "The PEPEW Light API request timed out. Please try again.",
+  },
+  {
+    pattern: /network|failed to fetch|unreachable|connection|ECONN|ENOTFOUND|EAI_AGAIN/i,
+    message: "The PEPEW Light API is temporarily unavailable.",
+  },
+  {
+    pattern: /not found|404/i,
+    message: "No transaction data was found for this request.",
+  },
+];
+
 type FetchHealth = {
   status: "idle" | "ok" | "fail";
   statusCode: number | null;
@@ -51,6 +70,14 @@ type TxDetailState = {
   error: string | null;
   data: any | null;
 };
+
+function safeErrorMessage(error: unknown, fallback = "Unable to load wallet data. Please try again later.") {
+  const raw = typeof error === "string" ? error : (error as any)?.message || String(error || "");
+  for (const item of SAFE_ERROR_PATTERNS) {
+    if (item.pattern.test(raw)) return item.message;
+  }
+  return fallback;
+}
 
 function txidOf(tx: any): string {
   return String(tx?.txid ?? tx?.tx_hash ?? tx?.hash ?? tx?.id ?? "");
@@ -212,7 +239,12 @@ export default function History() {
         const latencyMs = Date.now() - startedAt;
         return { ok: true, status: 200, latencyMs, payload: parseHistoryPayload(payload) };
       } catch (e: any) {
-        return { ok: false, status: null, latencyMs: Date.now() - startedAt, error: e?.message || t("errors.apiUnreachable") };
+        return {
+          ok: false,
+          status: null,
+          latencyMs: Date.now() - startedAt,
+          error: safeErrorMessage(e, "Unable to load transaction history. Please try again later."),
+        };
       }
     })();
 
@@ -248,7 +280,7 @@ export default function History() {
         setLastUpdatedAt(Date.now());
       } catch (e: any) {
         if (!active) return;
-        setErr(e?.message || t("errors.apiUnreachable"));
+        setErr(safeErrorMessage(e, "Unable to load transaction history. Please try again later."));
         setHealth((prev) => ({ ...prev, status: "fail" }));
       } finally {
         if (active) setLoading(false);
@@ -311,7 +343,7 @@ export default function History() {
       txDetailCacheRef.current.set(txid, payload);
       setTxDetail({ txid, loading: false, error: null, data: payload });
     } catch (e: any) {
-      setTxDetail({ txid, loading: false, error: e?.message || "Transaction detail lookup failed.", data: null });
+      setTxDetail({ txid, loading: false, error: safeErrorMessage(e, "Failed to load transaction details."), data: null });
     }
   };
 
@@ -327,10 +359,16 @@ export default function History() {
     <AppLayout>
       <PageCard title={t("history.title")}>
         {!currentAddress ? (
-          <div className="card"><p>{t("history.emptyAddress")}</p></div>
-        ) : err ? (
           <div className="card">
-            <p className="error">{t("history.readFailed")}: {err}</p>
+            <div className="section-title">{t("history.title")}</div>
+            <p className="muted">Set your wallet address on the Home page first.</p>
+            <div className="row"><Link className="btn" to="/">{t("history.goReceive")}</Link></div>
+          </div>
+        ) : err ? (
+          <div className="card" style={{ border: "1px solid rgba(220, 50, 50, 0.45)" }}>
+            <div className="section-title">{t("history.readFailed")}</div>
+            <p className="error">{err}</p>
+            <p className="muted" style={{ fontSize: "0.9rem" }}>No internal backend details are shown here. Retry after the PEPEW Light API is available.</p>
             <button className="btn secondary" onClick={handleRefresh}>{t("history.refresh")}</button>
           </div>
         ) : data ? (
@@ -345,10 +383,11 @@ export default function History() {
               <button className="btn secondary" onClick={handleRefresh} disabled={loading}>{loading ? t("loading") : t("history.refresh")}</button>
             </div>
 
-            {data?.error && <div className="muted" style={{ marginBottom: 8 }}>{data.error}</div>}
+            {data?.error && <div className="muted" style={{ marginBottom: 8 }}>{safeErrorMessage(data.error, "History response included a warning.")}</div>}
             {!txs.length ? (
-              <div>
-                <p>{loading ? t("history.loading") : t("history.emptyTxs")}</p>
+              <div className="card" style={{ boxShadow: "none", border: "1px dashed var(--border)" }}>
+                <div className="section-title">{loading ? t("history.loading") : t("wallet.history.empty")}</div>
+                <p className="muted">No transactions found for this address. Once PEPEW is received or sent, transactions will appear here.</p>
                 <div className="row"><Link className="btn" to="/">{t("history.goReceive")}</Link></div>
               </div>
             ) : (
@@ -359,24 +398,24 @@ export default function History() {
                     const detailSummary = isActiveDetail ? activeDetailSummary : null;
                     return (
                       <div key={tx.key}>
-                        <div className="tx-row">
+                        <div className="tx-row" style={{ alignItems: "stretch" }}>
                           <div className="tx-info">
-                            <div className="tx-line">
+                            <div className="tx-line" style={{ flexWrap: "wrap" }}>
                               <span className="muted">Status: </span>
                               <strong>{tx.statusLabel}</strong>
                               <span className="muted" style={{ marginLeft: 8 }}>Height: </span>
                               <span>{tx.heightLabel}</span>
                             </div>
-                            <div className="tx-line"><span className="muted">{t("history.timeLabel")}: </span><span>{tx.timeLabel}</span></div>
-                            <div className="tx-line">
+                            <div className="tx-line" style={{ flexWrap: "wrap" }}><span className="muted">{t("history.timeLabel")}: </span><span>{tx.timeLabel}</span></div>
+                            <div className="tx-line" style={{ flexWrap: "wrap" }}>
                               <span className="muted">{t("history.txidLabel")}: </span>
-                              <a href={`/tx?txid=${tx.txid}`} target="_blank" rel="noopener noreferrer" title={tx.txid} style={{ color: "var(--primary-color)", textDecoration: "underline" }}>
+                              <a href={`/tx?txid=${tx.txid}`} target="_blank" rel="noopener noreferrer" title={tx.txid} style={{ color: "var(--primary-color)", textDecoration: "underline", wordBreak: "break-all" }}>
                                 <code>{shortTxid(tx.txid)}</code>
                               </a>
                             </div>
                           </div>
 
-                          <div className="tx-actions">
+                          <div className="tx-actions" style={{ flexWrap: "wrap" }}>
                             <button className="btn ghost small" onClick={() => openTxDetail(tx.txid)} disabled={!tx.txid || txDetail?.loading}>
                               {isActiveDetail ? (txDetail?.loading ? t("loading") : t("hide")) : t("wallet.history.openTx")}
                             </button>
