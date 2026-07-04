@@ -4,6 +4,8 @@ This document records the current public-beta send behavior for the PEPEW Light 
 
 ## Current status
 
+- Web wallet smoke test: OK.
+- Payment query test: OK.
 - Small-amount send test: OK.
 - Consecutive small sends: OK after automatic retry was added.
 - Client-side signing: enabled.
@@ -70,6 +72,7 @@ Before public beta announcements, retest:
 - Import mnemonic.
 - Load balance.
 - Load history.
+- Check payment query.
 - Send a small amount.
 - Send 2-3 consecutive small transactions.
 - Confirm retry message appears only when the API/indexer is catching up.
@@ -78,4 +81,10 @@ Before public beta announcements, retest:
 
 ## Current test result
 
-As of this note, small-amount send and consecutive sends are working after automatic retry.
+As of this note:
+
+- docs cleanup: OK.
+- payment query: OK.
+- web wallet smoke test: OK.
+- small-amount send: OK.
+- consecutive sends after automatic retry: OK.
