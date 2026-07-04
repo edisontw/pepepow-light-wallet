@@ -196,10 +196,18 @@ Do not hard-code bilingual text in wallet components. UI strings should use the 
 
 ## Documentation
 
+Start here:
+
+- [Documentation index](docs/README.md)
+
+Core references:
+
 - [Architecture](docs/architecture.md)
 - [Security](docs/security.md)
 - [PEPEW Light API integration](docs/pepew-api.md)
+- [Broadcast contract](docs/broadcast-plan.md)
 - [Deployment layout](docs/deploy_layout.md)
 - [Production deploy path](docs/deploy-light-pepepow-net.md)
+- [Production smoke test](docs/production-smoke-test.md)
 - [Send beta test notes](docs/send-beta-test-notes.md)
 - [Development compass](docs/DEV_COMPASS.md)
