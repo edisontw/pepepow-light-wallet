@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { normalizeLang, SUPPORTED_LANGS } from "../../i18n";
@@ -12,8 +13,38 @@ type NavItem = {
   short: string;
 };
 
-const assetBase = import.meta.env.BASE_URL || "/";
-const logoUrl = `${assetBase}brand/logo.png`;
+const normalizedBase = (import.meta.env.BASE_URL || "/").endsWith("/")
+  ? (import.meta.env.BASE_URL || "/")
+  : `${import.meta.env.BASE_URL}/`;
+
+const logoCandidates = Array.from(new Set([
+  `${normalizedBase}brand/logo.png`,
+  "/wallet/brand/logo.png",
+  "/brand/logo.png",
+  `${normalizedBase}favicon.ico`,
+  "/wallet/favicon.ico",
+  "/favicon.ico",
+]));
+
+function BrandLogo() {
+  const [logoIndex, setLogoIndex] = useState(0);
+  const logoUrl = logoCandidates[logoIndex];
+
+  if (!logoUrl) {
+    return <span className="brand-logo-fallback" aria-hidden="true">PW</span>;
+  }
+
+  return (
+    <img
+      src={logoUrl}
+      alt="PEPEPOW"
+      className="brand-logo"
+      loading="eager"
+      decoding="async"
+      onError={() => setLogoIndex((current) => current + 1)}
+    />
+  );
+}
 
 export default function Header({ compact }: HeaderProps) {
   const { t, i18n } = useTranslation();
@@ -41,7 +72,7 @@ export default function Header({ compact }: HeaderProps) {
     <header className={`app-header${compact ? " compact" : ""}`}>
       <div className="app-header-inner">
         <Link to="/" className="brand" aria-label={t("title")}>
-          <img src={logoUrl} alt="PEPEPOW" className="brand-logo" loading="eager" decoding="async" />
+          <BrandLogo />
           <span className="brand-text">
             <span className="brand-name">PEPEPOW</span>
             <span className="brand-sub">{t("header.wallet")}</span>
