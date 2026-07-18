@@ -1,6 +1,7 @@
 import "./theme.css";
 import "./styles/ui.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import PrivacySafePageView from "./components/PrivacySafePageView";
 import WalletHome from "./pages/WalletHome";
 import History from "./pages/History";
 import Send from "./pages/Send";
@@ -8,6 +9,7 @@ import Send from "./pages/Send";
 export default function App() {
   return (
     <BrowserRouter basename="/wallet">
+      <PrivacySafePageView />
       <Routes>
         <Route path="/" element={<WalletHome />} />
         <Route path="/history" element={<History />} />
