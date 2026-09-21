@@ -1,13 +1,13 @@
 // =============================================================
 //  PEPEPOW NETWORK PARAMS  (CONFIRMED FROM chainparams.cpp)
 // =============================================================
-// pubKeyHash : 55 (0x37) -> 'X'
+// pubKeyHash : 55 (0x37) -> PEPEPOW P2PKH addresses currently display with 'P'
 // scriptHash : 16 (0x10) -> '7'
 // wif        : 204 (0xCC)
 // SLIP-0044  : 5 -> m/44'/5'/0'/0/0
 // =============================================================
 
-// Define PEPEPOW network params (PLACEHOLDER; set correct version bytes!)
+// Define PEPEPOW network params confirmed from chainparams.cpp.
 export interface PepepowNetwork {
   messagePrefix: string;
   bech32?: string;
@@ -19,7 +19,7 @@ export interface PepepowNetwork {
 
 export const PEPEPOW: PepepowNetwork = {
   // Confirmed from chainparams.cpp
-  // pubKeyHash : 55 (0x37) -> 'X'
+  // pubKeyHash : 55 (0x37) -> PEPEPOW P2PKH addresses currently display with 'P'
   // scriptHash : 16 (0x10) -> '7'
   // wif        : 204 (0xCC)
   messagePrefix: '\\x18PEPEPOW Signed Message:\\n',
