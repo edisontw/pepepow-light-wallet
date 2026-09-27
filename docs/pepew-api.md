@@ -216,6 +216,8 @@ Purpose:
 - return spendable outputs for client-side coin selection
 - keep UTXO selection, fee calculation, transaction construction, and signing inside the wallet client
 
+Public wallet response fields are normalized by the gateway to `txid` and `vout`. The underlying ElectrumX `tx_hash` / `tx_pos` field names are internal upstream details and must not be used as the public wallet client contract.
+
 Response example:
 
 ```json
@@ -223,8 +225,8 @@ Response example:
   "address": "PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb",
   "utxos": [
     {
-      "tx_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      "tx_pos": 0,
+      "txid": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "vout": 0,
       "height": 4620000,
       "value": 100000000
     }
