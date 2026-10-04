@@ -45,6 +45,10 @@ export const ru = {
     },
     errors: {
       apiUnreachable: "Не удается подключиться к API",
+      invalidAddress: "Неверный адрес PEPEPOW.",
+      timeout: "Время ожидания запроса баланса истекло. Повторите попытку.",
+      rateLimit: "Слишком много запросов. Подождите немного и повторите попытку.",
+      txLoadFailed: "Не удалось загрузить эту транзакцию.",
       apiNotFound: "Эндпоинт API не найден",
       networkError: "Сетевая ошибка",
       unexpected: "Непредвиденная ошибка",

@@ -104,7 +104,7 @@ function mapLightApiError(raw: string, status?: number) {
     return i18n.t("errors.rateLimit");
   }
   if (text.includes("timeout") || text.includes("timed out") || text.includes("abort")) {
-    return i18n.t("errors.rateLimit");
+    return i18n.t("errors.timeout");
   }
   if (text.includes("tx_not_found") || text.includes("txnotfound") || text.includes("invalid_txid") || text.includes("tx_lookup")) {
     return i18n.t("errors.txLoadFailed");
@@ -152,7 +152,7 @@ export class PepewLightApiClient {
     } catch (err: any) {
       clearTimeout(timer);
       if (err?.name === "AbortError") {
-        throw new Error(i18n.t("errors.rateLimit"));
+        throw new Error(i18n.t("errors.timeout"));
       }
       throw new Error(mapLightApiError(err?.message || "network error"));
     }
