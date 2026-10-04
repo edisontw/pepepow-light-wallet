@@ -357,8 +357,8 @@ const resources = {
       wallet: {
         beta: {
           title: "公開測試版",
-          description: "目前提供唯讀錢包功能。送出與廣播交易會在 signed transaction 流程完整驗證後才加入。",
-          readOnly: "公開測試期間暫停送出交易。目前錢包僅支援餘額與交易紀錄查詢。交易廣播功能會在 signed raw transaction 流程完整驗證後才加入。"
+          description: "PEPEW Light Wallet 是用戶端運作的非託管公開測試版。餘額、交易紀錄與 UTXO 資料由 PEPEW Light API 提供；交易建立與簽章只在瀏覽器內完成。",
+          sendStatus: "已開放送出交易。只有完成簽章的 raw transaction 會送至 PEPEW Light 廣播。建議先以小額測試；若錢包有大量小額 UTXO，可能需要先整理（consolidate）。"
         },
         security: {
           title: "非託管安全提示",
@@ -770,8 +770,8 @@ const resources = {
       wallet: {
         beta: {
           title: "Public Beta",
-          description: "Read-only wallet features are available. Sending and broadcasting will be added only after the signed transaction flow is fully verified.",
-          readOnly: "Sending is disabled during the public beta. This wallet currently supports balance and history lookup only. Broadcasting will only accept signed raw transactions after the flow is fully verified."
+          description: "PEPEW Light Wallet is a client-side, non-custodial public beta. Balance, history, and UTXO data come from PEPEW Light API; transaction construction and signing stay in your browser.",
+          sendStatus: "Sending is enabled. Only a fully signed raw transaction is sent to PEPEW Light for broadcast. Test with small amounts first; wallets with many small UTXOs may need consolidation."
         },
         security: {
           title: "Non-custodial Safety Warning",
