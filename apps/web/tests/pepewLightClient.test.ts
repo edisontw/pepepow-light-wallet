@@ -119,7 +119,7 @@ async function runTests() {
         await client.getAddress("invalid");
       },
       (err: any) => {
-        return err.message.includes("Invalid PEPEW address");
+        return err.message.includes("Invalid PEPEPOW address");
       }
     );
 
