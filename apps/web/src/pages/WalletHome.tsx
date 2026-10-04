@@ -165,7 +165,7 @@ export default function WalletHome() {
               <div className="section-title" style={{ color: "rgba(0, 150, 255, 1)" }}>{t("wallet.beta.title")}</div>
               <div className="muted" style={{ marginTop: 6, lineHeight: 1.55, fontSize: "0.9rem" }}>
                 <div>{t("wallet.beta.description")}</div>
-                <div>{t("wallet.beta.readOnly")}</div>
+                <div>{t("wallet.beta.sendStatus")}</div>
               </div>
             </div>
             <a className="btn secondary small" href="https://light.pepepow.net/" style={{ textDecoration: "none" }}>
