@@ -69,7 +69,8 @@ const resources = {
       errors: {
         apiUnreachable: "無法連線到 PEPEW Light API，請稍後再試。",
         invalidAddress: "PEPEPOW 地址格式不正確。",
-        rateLimit: "網路服務暫時忙碌，請稍後再試。",
+        timeout: "餘額查詢逾時，請再試一次。",
+        rateLimit: "請求過於頻繁，請稍候再試。",
         noHistory: "查無交易紀錄。",
         txLoadFailed: "無法載入此交易。",
         apiNotFound: "API endpoint 不存在",
@@ -475,7 +476,8 @@ const resources = {
       errors: {
         apiUnreachable: "Unable to connect to PEPEW Light API. Please try again later.",
         invalidAddress: "Invalid PEPEPOW address.",
-        rateLimit: "Network service is temporarily busy.",
+        timeout: "Balance lookup timed out. Please try again.",
+        rateLimit: "Too many requests. Please wait a moment and try again.",
         noHistory: "No transaction history found.",
         txLoadFailed: "This transaction could not be loaded.",
         apiNotFound: "API endpoint not found",
