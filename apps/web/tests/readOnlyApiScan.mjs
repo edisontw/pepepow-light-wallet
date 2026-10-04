@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = process.cwd();
-const distRoot = path.join(root, "apps/web/dist");
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const appRoot = path.resolve(scriptDir, "..");
+const distRoot = path.join(appRoot, "dist");
 
 if (!fs.existsSync(distRoot)) {
   console.error("apps/web/dist not found. Run `npm run build` before scan:readonly-api.");
@@ -45,7 +47,7 @@ function* walk(dir) {
 
 const hits = [];
 for (const file of walk(distRoot)) {
-  const rel = path.relative(root, file);
+  const rel = path.relative(appRoot, file);
   const text = fs.readFileSync(file, "utf8");
   for (const term of forbidden) {
     if (text.includes(term)) {
