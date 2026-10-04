@@ -14,6 +14,7 @@ https://light.pepepow.net/wallet/
 - Import mnemonic works.
 - Address displays after wallet creation or mnemonic import.
 - Confirmed balance displays in the wallet home page.
+- Public Beta notice states that sending is enabled.
 - Send page builds, signs, and broadcasts from the browser.
 - Send page submits only signed raw tx to `/api/wallet/broadcast`.
 - Consecutive small sends work with automatic UTXO/indexer retry.
@@ -91,12 +92,23 @@ Unsafe appearances that must be patched immediately:
 ```bash
 cd /home/ubuntu/pepepow-light-wallet
 git status --short
+git pull --ff-only origin main
 export PATH="/home/ubuntu/node-dist/bin:$PATH"
-npm --prefix apps/web run test:client
+
+npm ci
+npm --prefix packages/wallet-core ci
+npm --prefix apps/web ci
+
+npm run test:uint64
+npm run test:client
+npm run test:amount
 npm run build
-npm --prefix apps/web run scan:readonly-api
-sudo mkdir -p /var/www/pepew-light/wallet
+npm run scan:readonly-api
+
+sudo mkdir -p /var/www/pepew-light/wallet /var/www/pepew-light/wallet.previous
+sudo rsync -a --delete /var/www/pepew-light/wallet/ /var/www/pepew-light/wallet.previous/
 sudo rsync -a --delete apps/web/dist/ /var/www/pepew-light/wallet/
+
 sudo nginx -t
 sudo systemctl reload nginx
 ```
