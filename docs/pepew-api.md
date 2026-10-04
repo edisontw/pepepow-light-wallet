@@ -116,6 +116,80 @@ Regex preflight after removing optional `0x`:
 ^[0-9a-fA-F]+$
 ```
 
+## Public information endpoints
+
+These endpoints are part of PEPEW Light but are not required for wallet signing. They are useful for the wallet UI, community bots, monitoring, and other read-only applications.
+
+### Canonical price
+
+```http
+GET /api/price
+```
+
+Current role:
+
+- cached PEPEW/USDT market data from NonKYC
+- canonical lightweight PEPEW Light price endpoint
+- includes price and available 24h market fields
+- typical cache TTL: about 120 seconds
+
+Example:
+
+```bash
+curl -fsS https://light.pepepow.net/api/price | jq
+```
+
+### Multi-source market summary
+
+```http
+GET /api/market
+```
+
+Current aggregation:
+
+- CoinMarketCap price through the existing PEPEPOW server-side CMC cache
+- NonKYC PEPEW/USDT price
+- NonKYC 24h USD volume from PEPEW/USDT + PEPEW/BNB
+- NestEx PEPEW/USDT price and 24h volume when available
+- total 24h volume from available exchange sources
+- on-chain money supply
+- on-chain market cap calculated from money supply × CMC price
+
+The response exposes source-level status. A temporary failure from one market can produce `status: "partial"` while other sources remain usable.
+
+Typical cache behavior:
+
+- fresh cache: about 120 seconds
+- stale fallback window: about 900 seconds
+
+Example:
+
+```bash
+curl -fsS https://light.pepepow.net/api/market | jq
+```
+
+### Network summary
+
+```http
+GET /api/network
+```
+
+Current aggregation:
+
+- chain height from ElectrumX via PEPEW Light
+- network hashrate
+- on-chain money supply
+- cached canonical NonKYC price
+- derived market cap using the canonical NonKYC price
+
+Example:
+
+```bash
+curl -fsS https://light.pepepow.net/api/network | jq
+```
+
+For backend implementation details, caching, and source adapters, `edisontw/pepepow-electrumx-service` is the source of truth. Wallet clients should not reimplement direct exchange/explorer aggregation.
+
 ## Wallet endpoints
 
 ### Address summary
@@ -463,6 +537,7 @@ Typical production cache TTLs:
 | balance/address summary | 10-20 seconds |
 | history | 20-60 seconds |
 | tx lookup | 5-10 minutes |
+| price / market / network summaries | about 2 minutes |
 
 Suggested polling intervals:
 
@@ -478,6 +553,9 @@ Suggested polling intervals:
 ```bash
 curl -s https://light.pepepow.net/api/health
 curl -s https://light.pepepow.net/api/status
+curl -s https://light.pepepow.net/api/price
+curl -s https://light.pepepow.net/api/market
+curl -s https://light.pepepow.net/api/network
 curl -s https://light.pepepow.net/api/wallet/address/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb
 curl -s "https://light.pepepow.net/api/wallet/history/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb?limit=5&offset=0"
 curl -s https://light.pepepow.net/api/wallet/utxo/PRfbEeHAKKbz6Voz85WJudrJwTA3ZbHunb

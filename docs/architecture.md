@@ -7,6 +7,7 @@ PEPEW Light Wallet is a client-side web wallet for PEPEPOW / PEPEW. The current 
 - Keep the wallet non-custodial.
 - Keep all wallet secret handling in the browser/client.
 - Use PEPEW Light API for address, history, UTXO, transaction, and signed-broadcast calls.
+- Keep public price / market / network aggregation in PEPEW Light API rather than duplicating exchange or explorer calls in wallet/community clients.
 - Keep ElectrumX and PEPEPOWd private behind the backend gateway.
 - Build a lightweight wallet suitable for an Oracle Cloud single-core / 6 GB host when served with the existing node, ElectrumX, API, and static files.
 
@@ -31,6 +32,8 @@ Nginx
         v
 PEPEW Light API
   FastAPI gateway from pepepow-electrumx-service
+  - wallet read queries + signed raw-tx broadcast
+  - cached price / market / network summaries
         |
         v
 ElectrumX on localhost

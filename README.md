@@ -10,20 +10,22 @@ It uses PEPEW Light API for balance, history, UTXO, transaction lookup, and sign
 
 ## Public beta notice
 
-This is a public beta release. Small-amount send testing is working, including consecutive sends with automatic UTXO/indexer retry. Users should test with small amounts first.
+This is a public beta release. Sending is enabled: transactions are constructed and signed in the browser, and PEPEW Light receives only the fully signed raw transaction for broadcast. Consecutive sends use automatic UTXO/indexer retry. Users should test with small amounts first, and wallets with many small UTXOs may need consolidation before a large send.
 
 ## Current focus
 
 Phase 4.5 / Phase 5 development focuses on making the public ElectrumX-based web wallet safe and usable:
 
 - fast `/wallet/` static loading
-- balance and history display through PEPEW Light API
+- balance, history, UTXO, and transaction lookup through PEPEW Light API
 - receive address and QR display
 - mnemonic import UX polish
 - clear non-custodial safety warnings
 - friendly API / address / network error handling
-- client-side transaction signing
+- client-side transaction construction and signing
 - signed raw transaction broadcast only
+- manual / automatic UTXO consolidation for wallets with many small outputs
+- public PEPEW Light information APIs for price, market, and network status
 
 ## Security boundary
 
@@ -154,15 +156,33 @@ Build and deploy:
 
 ```bash
 cd /home/ubuntu/pepepow-light-wallet
-git pull origin main
+git status --short
+git pull --ff-only origin main
+
 export PATH="/home/ubuntu/node-dist/bin:$PATH"
-rm -rf apps/web/dist
+
+npm ci
+npm --prefix packages/wallet-core ci
+npm --prefix apps/web ci
+
+npm run test:uint64
+npm run test:client
+npm run test:amount
 npm run build
-sudo mkdir -p /var/www/pepew-light/wallet
+npm run scan:readonly-api
+
+sudo mkdir -p /var/www/pepew-light/wallet /var/www/pepew-light/wallet.previous
+sudo rsync -a --delete /var/www/pepew-light/wallet/ /var/www/pepew-light/wallet.previous/
 sudo rsync -a --delete apps/web/dist/ /var/www/pepew-light/wallet/
+
 sudo nginx -t
 sudo systemctl reload nginx
+
+curl -I https://light.pepepow.net/wallet/
+curl -fsS https://light.pepepow.net/api/health
 ```
+
+This is a static-wallet deployment. It does not require restarting PEPEW Light API, ElectrumX, or PEPEPOWd. Backend/API changes are deployed separately from `pepepow-electrumx-service`.
 
 This wallet is deployed under `/wallet/`, so Vite must use:
 

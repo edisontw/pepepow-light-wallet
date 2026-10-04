@@ -10,7 +10,7 @@ PEPEW Light Wallet is a client-side, non-custodial PEPEPOW web wallet served at:
 https://light.pepepow.net/wallet/
 ```
 
-The wallet uses PEPEW Light API for blockchain data and signed raw transaction broadcast. Mnemonic, private keys, derivation, and signing remain in the browser.
+The wallet uses PEPEW Light API for blockchain data and signed raw transaction broadcast. Sending is enabled in the public beta: mnemonic, private keys, derivation, transaction construction, and signing remain in the browser, while the backend receives only public lookup data and fully signed raw transactions.
 
 ## Active docs
 
@@ -35,8 +35,11 @@ Old wallet-suite documents for messaging integrations, trading bots, exchange au
 Run:
 
 ```bash
+npm run test:uint64
+npm run test:client
+npm run test:amount
 npm run build
-npm --prefix apps/web run scan:readonly-api
+npm run scan:readonly-api
 ```
 
 Deploy static files to:
