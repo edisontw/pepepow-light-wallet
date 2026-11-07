@@ -25,7 +25,7 @@ assert.equal(selectConfirmedConsolidationUtxos(duplicates, new Set(), 20).length
 const many = Array.from({ length: 150 }, (_, i) => utxo(i + 1));
 const plan = prepareConsolidationPlan(many, new Set(), MAX_CONSOLIDATION_INPUTS);
 assert.equal(plan.selected.length, 80);
-assert.equal(plan.totalCandidates, 80);
+assert.equal(plan.totalCandidates, 150);
 assert.equal(plan.estimatedBytes, 11_884);
 assert.equal(plan.feeAtomic, 1_200_000n);
 assert.equal(plan.totalInAtomic, 160_000_000n);
