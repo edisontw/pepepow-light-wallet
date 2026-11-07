@@ -624,7 +624,10 @@ export default function Send() {
         getExcludedOutpoints: () => loadRecentSpentOutpoints(),
         broadcastRound: broadcastConsolidationPlan,
         isPaused: () => autoStopRef.current || document.visibilityState === "hidden",
-        onProgress: setAutoProgress,
+        onProgress: (progress) => {
+          setAutoProgress(progress);
+          if (progress.phase !== "broadcasting") setConsolidationPhase("");
+        },
       });
       setConsolidationPreview(null);
       setConsolidationResultNote(t(`wallet.send.consolidateAutoResult_${outcome.status}`, {
