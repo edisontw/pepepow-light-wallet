@@ -24,7 +24,7 @@ Phase 4.5 / Phase 5 development focuses on making the public ElectrumX-based web
 - friendly API / address / network error handling
 - client-side transaction construction and signing
 - signed raw transaction broadcast only
-- manual / automatic UTXO consolidation for wallets with many small outputs
+- manual single-batch UTXO consolidation (20/40/80 inputs), with local signing, confirmation preview, and recently-spent protection; automatic multi-round mode is not yet enabled
 - public PEPEW Light information APIs for price, market, and network status
 
 ## Security boundary
