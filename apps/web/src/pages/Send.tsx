@@ -696,6 +696,11 @@ export default function Send() {
                 <button className="btn secondary" type="button" onClick={refreshUtxoState} disabled={busy}>
                   {t("wallet.send.refreshUtxos")}
                 </button>
+                <button className="btn secondary" type="button" disabled={busy} onClick={() => {
+                  setConsolidationOpen((value) => !value);
+                  setConsolidationPreview(null);
+                  setConsolidationError(null);
+                }}>{t("wallet.send.advancedConsolidate")}</button>
                 {broadcastTxid && (
                   <button className="btn secondary" type="button" onClick={handleSendAnother} disabled={busy}>
                     Clear for next send
@@ -703,6 +708,72 @@ export default function Send() {
                 )}
               </div>
             </div>
+
+            {consolidationOpen && (
+              <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div className="section-title">{t("wallet.send.advancedConsolidate")}</div>
+                <p className="muted" style={{ margin: 0 }}>
+                  Merge confirmed small UTXOs into one output at your own address. This creates a real on-chain
+                  transaction and spends a network fee. Manual single-batch mode only: wait for indexing or
+                  confirmation before starting the next batch.
+                </p>
+                <div>
+                  <label className="field-label" htmlFor="consolidation-cap">Inputs per batch (maximum 80)</label>
+                  <select id="consolidation-cap" className="input" value={consolidationCap} disabled={busy} onChange={(e) => {
+                    setConsolidationCap(Number(e.target.value));
+                    setConsolidationPreview(null);
+                    setConsolidationError(null);
+                  }}>
+                    <option value={20}>20</option>
+                    <option value={40}>40</option>
+                    <option value={80}>80</option>
+                  </select>
+                </div>
+                {!consolidationPreview && !consolidationTxid && (
+                  <button className="btn secondary" type="button" disabled={busy || !mnemonic} onClick={prepareConsolidation}>
+                    Preview consolidation
+                  </button>
+                )}
+                {consolidationPhase && <p className="muted" role="status" style={{ margin: 0 }}>{consolidationPhase}</p>}
+                {consolidationError && <p className="error" role="alert" style={{ margin: 0 }}>{consolidationError}</p>}
+                {consolidationPreview && (
+                  <div className="card warning-banner" style={{ margin: 0 }}>
+                    <div className="section-title">Confirm UTXO consolidation</div>
+                    <div className="note" style={{ marginTop: 8 }}>
+                      <div>Confirmed inputs: {consolidationPreview.selected.length} / {consolidationPreview.totalCandidates} eligible</div>
+                      <div>Estimated transaction size: {consolidationPreview.estimatedBytes} bytes</div>
+                      <div>Total input: {formatAtomicAsPepew(consolidationPreview.totalInAtomic)} PEPEW</div>
+                      <div>Network fee: {formatAtomicAsPepew(consolidationPreview.feeAtomic)} PEPEW</div>
+                      <div>Returns to your own address: {formatAtomicAsPepew(consolidationPreview.outputAtomic)} PEPEW</div>
+                      <div>Destination: <code style={{ overflowWrap: "anywhere" }}>{fromAddress}</code></div>
+                    </div>
+                    <p className="muted">
+                      Estimated fee: 0.001 PEPEW per started kB (Android v2 policy).
+                      This real transaction cannot be reversed.
+                    </p>
+                    <div className="row">
+                      <button className="btn" type="button" disabled={busy} onClick={confirmConsolidation}>
+                        Confirm &amp; broadcast
+                      </button>
+                      <button className="btn secondary" type="button" disabled={busy} onClick={() => setConsolidationPreview(null)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {consolidationTxid && (
+                  <div className="note" role="status">
+                    <strong>Consolidation submitted.</strong>
+                    <div>TxID: <code style={{ overflowWrap: "anywhere" }}>{consolidationTxid}</code></div>
+                    <div>Wait for indexing or confirmation before preparing another batch.</div>
+                    <button className="btn secondary" type="button" disabled={busy} onClick={() => {
+                      setConsolidationTxid(null);
+                      void refreshUtxoState();
+                    }}>Refresh UTXOs / Next batch</button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {broadcastTxid && (
               <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
