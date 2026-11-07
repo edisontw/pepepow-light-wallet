@@ -19,7 +19,7 @@ Applies to `https://light.pepepow.net/wallet/send`, implemented in `apps/web/src
 - After a successful broadcast, the next round is blocked until **all previously selected inputs disappear** and the new consolidation output is **confirmed** in the Light API UTXO snapshot.
 - Indexer polling is bounded: **12 seconds** between requests and **20 attempts per round** (normally approximately four minutes, plus API latency). This avoids high-frequency load on the single-core gateway.
 - If a transaction cannot be verified as indexed/confirmed within the polling window, the loop **pauses**. A rejected, failed or *ambiguous* broadcast is never blindly retried.
-- The **Pause further batches** button prevents another round, but cannot retract an in-flight transaction. A browser tab entering the background also stops future rounds; the user should keep the tab foregrounded.
+- The **Pause further batches** button prevents another round, but cannot retract an in-flight transaction. After the one-time approval, work can continue while the tab is open in the background; however, browser timer throttling or device sleep can delay or suspend progress. Navigating away or closing the tab stops the session.
 - There is **no automatic resume after reload/navigation**. Check transaction history and obtain a fresh preview before intentionally starting another session.
 - Manual and automatic processing are mutually exclusive with regular Send UI actions in the current tab during a running operation. Do not run the wallet in parallel signing tabs.
 
