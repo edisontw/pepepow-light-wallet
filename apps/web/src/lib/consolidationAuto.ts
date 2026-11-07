@@ -1,16 +1,50 @@
 import {
   MAX_CONSOLIDATION_INPUTS,
+  estimateConsolidationFee,
   prepareConsolidationPlan,
   selectConfirmedConsolidationUtxos,
   type ConsolidationCandidate,
   type ConsolidationPlan,
 } from "./consolidationPolicy";
 
-export const MAX_AUTO_CONSOLIDATION_ROUNDS = 5;
-export const AUTO_CONSOLIDATION_POLL_MS = 12_000;
-export const AUTO_CONSOLIDATION_MAX_POLLS = 20; // ~4 min/round, no polling storm
+// Emergency guard only; a normal session stops as soon as all eligible UTXOs are consolidated.
+export const MAX_AUTO_CONSOLIDATION_ROUNDS = 1000;
 
-export type AutoConsolidationPhase = "broadcasting" | "waiting" | "preparing" | "done" | "limit" | "paused";
+export interface AutoConsolidationEstimate {
+  rounds: number;
+  estimatedTotalFeeAtomic: bigint;
+}
+
+/**
+ * One confirmed self-return output replaces each selected batch.
+ * Preview the exact initial UTXO reduction and estimated cumulative fee.
+ * The plan is a bounded user authorization, not an infinite background job.
+ */
+export function estimateAutoConsolidation(eligibleCount: number, batchSize: number): AutoConsolidationEstimate {
+  if (!Number.isSafeInteger(eligibleCount) || eligibleCount < 2) {
+    throw new Error("At least two eligible UTXOs are required.");
+  }
+  if (!Number.isInteger(batchSize) || batchSize < 2 || batchSize > MAX_CONSOLIDATION_INPUTS) {
+    throw new Error("Invalid consolidation batch size.");
+  }
+  let remaining = eligibleCount;
+  let rounds = 0;
+  let estimatedTotalFeeAtomic = 0n;
+  while (remaining > 1 && rounds < MAX_AUTO_CONSOLIDATION_ROUNDS) {
+    const inputCount = Math.min(remaining, batchSize);
+    estimatedTotalFeeAtomic += estimateConsolidationFee(inputCount);
+    remaining = remaining - inputCount + 1;
+    rounds += 1;
+  }
+  if (remaining > 1) {
+    throw new Error("Too many UTXOs for one automatic session. Increase the batch size or consolidate in stages.");
+  }
+  return { rounds, estimatedTotalFeeAtomic };
+}
+export const AUTO_CONSOLIDATION_POLL_MS = 20_000;
+export const AUTO_CONSOLIDATION_MAX_POLLS = 30; // up to ~10 min/round at 3 indexer requests/min
+
+export type AutoConsolidationPhase = "broadcasting" | "waiting" | "preparing" | "done" | "limit" | "budget" | "paused";
 
 export interface AutoConsolidationProgress {
   phase: AutoConsolidationPhase;
@@ -23,7 +57,7 @@ export interface AutoConsolidationProgress {
 }
 
 export interface AutoConsolidationOutcome {
-  status: "done" | "limit" | "paused";
+  status: "done" | "limit" | "budget" | "paused";
   completedRounds: number;
   lastTxid?: string;
   eligibleUtxos?: number;
@@ -33,6 +67,7 @@ export interface AutoConsolidationOptions<T extends ConsolidationCandidate> {
   initialPlan: ConsolidationPlan<T>;
   batchSize: number;
   maxRounds: number;
+  maxTotalFeeAtomic: bigint;
   getUtxos: () => Promise<T[]>;
   getExcludedOutpoints: () => ReadonlySet<string>;
   broadcastRound: (plan: ConsolidationPlan<T>) => Promise<string>;
@@ -69,7 +104,14 @@ async function waitForRoundConfirmation<T extends ConsolidationCandidate>(
     });
     await delay(pollMs);
     if (opts.isPaused()) return { status: "paused" };
-    const utxos = await opts.getUtxos();
+    let utxos: T[];
+    try {
+      utxos = await opts.getUtxos();
+    } catch {
+      // Indexer read errors are safe to retry within the bounded polling window.
+      // Never retry a broadcast; if the API stays unavailable, pause the session.
+      continue;
+    }
     if (opts.isPaused()) return { status: "paused" };
     const remaining = new Set(utxos.map(getConsolidationOutpoint));
     const spentInputsGone = [...selected].every((outpoint) => !remaining.has(outpoint));
@@ -83,7 +125,7 @@ async function waitForRoundConfirmation<T extends ConsolidationCandidate>(
 }
 
 /**
- * Single browser session, max five user-authorized rounds.
+ * Single browser session, user-authorized number of rounds estimated from initial UTXO count.
  * Each accepted transaction must be indexed AND confirmed before the next round.
  * Never retries a failed or ambiguous broadcast; never automatically resumes on reload.
  */
@@ -99,18 +141,29 @@ export async function runAutoConsolidation<T extends ConsolidationCandidate>(
   if (opts.initialPlan.selected.length < 2 || opts.initialPlan.selected.length > opts.batchSize) {
     throw new Error("Invalid initial consolidation preview.");
   }
+  if (typeof opts.maxTotalFeeAtomic !== "bigint" || opts.maxTotalFeeAtomic <= 0n) {
+    throw new Error("Invalid authorized consolidation fee budget.");
+  }
 
   let plan = opts.initialPlan;
   let lastTxid: string | undefined;
   let completedRounds = 0;
+  let totalFeesAtomic = 0n;
 
   while (completedRounds < opts.maxRounds) {
     if (opts.isPaused()) return { status: "paused", completedRounds, lastTxid };
     const round = completedRounds + 1;
+    // External deposits can change the batch sizes after preview. Stop before any
+    // unapproved fee is spent; each signed fee is checked against the session budget.
+    if (totalFeesAtomic + plan.feeAtomic > opts.maxTotalFeeAtomic) {
+      opts.onProgress({ phase: "budget", round, maxRounds: opts.maxRounds, completedRounds, lastTxid });
+      return { status: "budget", completedRounds, lastTxid };
+    }
     opts.onProgress({ phase: "broadcasting", round, maxRounds: opts.maxRounds, completedRounds, lastTxid });
     const txid = await opts.broadcastRound(plan);
     if (!/^[0-9a-fA-F]{64}$/.test(txid)) throw new Error("Consolidation broadcast returned an invalid txid.");
     lastTxid = txid;
+    totalFeesAtomic += plan.feeAtomic;
     completedRounds += 1;
 
     const confirmation = await waitForRoundConfirmation(opts, plan, txid, completedRounds);

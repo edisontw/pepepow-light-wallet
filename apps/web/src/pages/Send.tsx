@@ -7,8 +7,8 @@ import AppLayout from "../components/layout/AppLayout";
 import PageCard from "../components/layout/PageCard";
 import { parsePepewToAtomic, PEPEW_DECIMALS } from "../lib/amount";
 import { pepewLightClient, LightAddressBalance, LightUtxo } from "../lib/pepewLightClient";
-import { MAX_CONSOLIDATION_TX_BYTES, estimateConsolidationFee, prepareConsolidationPlan, type ConsolidationPlan } from "../lib/consolidationPolicy";
-import { MAX_AUTO_CONSOLIDATION_ROUNDS, runAutoConsolidation, type AutoConsolidationProgress } from "../lib/consolidationAuto";
+import { MAX_CONSOLIDATION_TX_BYTES, prepareConsolidationPlan, type ConsolidationPlan } from "../lib/consolidationPolicy";
+import { estimateAutoConsolidation, runAutoConsolidation, type AutoConsolidationProgress } from "../lib/consolidationAuto";
 
 const DEFAULT_PATH = "m/44'/5'/0'/0/0";
 const DEFAULT_FEE = "0.0001";
@@ -276,7 +276,6 @@ export default function Send() {
   const [consolidationOpen, setConsolidationOpen] = useState(false);
   const [consolidationCap, setConsolidationCap] = useState(40);
   const [consolidationMode, setConsolidationMode] = useState<"manual" | "auto">("manual");
-  const [autoMaxRounds, setAutoMaxRounds] = useState(MAX_AUTO_CONSOLIDATION_ROUNDS);
   const [autoProgress, setAutoProgress] = useState<AutoConsolidationProgress | null>(null);
   const [autoPauseRequested, setAutoPauseRequested] = useState(false);
   const [consolidationResultNote, setConsolidationResultNote] = useState("");
@@ -288,16 +287,17 @@ export default function Send() {
   const [consolidationError, setConsolidationError] = useState<string | null>(null);
   const [consolidationTxid, setConsolidationTxid] = useState<string | null>(null);
   const consolidationLock = useRef(false);
+  const autoEstimate = useMemo(
+    () => consolidationMode === "auto" && consolidationPreview
+      ? estimateAutoConsolidation(consolidationPreview.totalCandidates, consolidationCap)
+      : null,
+    [consolidationMode, consolidationPreview, consolidationCap],
+  );
 
   useEffect(() => {
-    const pauseOnBackground = () => {
-      if (document.visibilityState === "hidden" && autoRunningRef.current) autoStopRef.current = true;
-    };
-    document.addEventListener("visibilitychange", pauseOnBackground);
-    return () => {
-      autoStopRef.current = true;
-      document.removeEventListener("visibilitychange", pauseOnBackground);
-    };
+    // Browser-only automation may continue in an open background tab, subject to
+    // browser timer throttling. Navigating away or unmounting stops future rounds.
+    return () => { autoStopRef.current = true; };
   }, []);
 
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
@@ -512,7 +512,9 @@ export default function Send() {
       const snapshot = await pepewLightClient.getUtxo(fromAddress);
       const recentlySpent = reconcileRecentSpentOutpoints(snapshot.utxos);
       setSpentOutpoints(recentlySpent);
-      setConsolidationPreview(prepareConsolidationPlan(snapshot.utxos, recentlySpent, consolidationCap));
+      const nextPlan = prepareConsolidationPlan(snapshot.utxos, recentlySpent, consolidationCap);
+      if (consolidationMode === "auto") estimateAutoConsolidation(nextPlan.totalCandidates, consolidationCap);
+      setConsolidationPreview(nextPlan);
     } catch (e) {
       setConsolidationError(safeError(e, "Unable to prepare consolidation. Refresh UTXOs and retry."));
     } finally {
@@ -610,12 +612,15 @@ export default function Send() {
     setConsolidationError(null);
     setConsolidationResultNote("");
     setAutoProgress(null);
-    // User explicitly approves at most maxRounds independent fee-paying transactions.
+    // One preview authorizes exactly the rounds and cumulative fee estimated from
+    // currently eligible UTXOs. No per-round human approval or automatic restart.
     try {
+      const estimate = estimateAutoConsolidation(first.totalCandidates, consolidationCap);
       const outcome = await runAutoConsolidation({
         initialPlan: first,
         batchSize: consolidationCap,
-        maxRounds: autoMaxRounds,
+        maxRounds: estimate.rounds,
+        maxTotalFeeAtomic: estimate.estimatedTotalFeeAtomic,
         getUtxos: async () => {
           const snapshot = await pepewLightClient.getUtxo(fromAddress);
           setSpentOutpoints(reconcileRecentSpentOutpoints(snapshot.utxos));
@@ -623,7 +628,7 @@ export default function Send() {
         },
         getExcludedOutpoints: () => loadRecentSpentOutpoints(),
         broadcastRound: broadcastConsolidationPlan,
-        isPaused: () => autoStopRef.current || document.visibilityState === "hidden",
+        isPaused: () => autoStopRef.current,
         onProgress: (progress) => {
           setAutoProgress(progress);
           if (progress.phase !== "broadcasting") setConsolidationPhase("");
@@ -834,15 +839,7 @@ export default function Send() {
                     <span>{t("wallet.send.consolidateModeAuto")}</span>
                   </label>
                   {consolidationMode === "auto" && (
-                    <>
-                      <label className="field-label" htmlFor="consolidation-rounds">{t("wallet.send.consolidateAutoMaxRounds")}</label>
-                      <select id="consolidation-rounds" className="input" value={autoMaxRounds} disabled={busy}
-                        onChange={(e) => { setAutoMaxRounds(Number(e.target.value)); setConsolidationPreview(null); }}>
-                        <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option>
-                        <option value={MAX_AUTO_CONSOLIDATION_ROUNDS}>{MAX_AUTO_CONSOLIDATION_ROUNDS}</option>
-                      </select>
-                      <p className="muted" style={{ margin: 0 }}>{t("wallet.send.consolidateAutoWarning")}</p>
-                    </>
+                    <p className="muted" style={{ margin: 0 }}>{t("wallet.send.consolidateAutoWarning")}</p>
                   )}
                 </div>
                 {autoProgress && (
@@ -878,23 +875,14 @@ export default function Send() {
                     <div className="section-title">{t("wallet.send.consolidateConfirmHeading")}</div>
                     <div className="note" style={{ marginTop: 8 }}>
                       <div>{t("wallet.send.consolidateInputs", { selected: consolidationPreview.selected.length, eligible: consolidationPreview.totalCandidates })}</div>
-                      <div>{t("wallet.send.consolidateEstimatedSize", { bytes: consolidationPreview.estimatedBytes })}</div>
-                      <div>{t("wallet.send.consolidateInputTotal")}: {formatAtomicAsPepew(consolidationPreview.totalInAtomic)} PEPEW</div>
                       <div>{t("wallet.send.feeLabel")}: {formatAtomicAsPepew(consolidationPreview.feeAtomic)} PEPEW</div>
-                      <div>{t("wallet.send.consolidateOutput")}: {formatAtomicAsPepew(consolidationPreview.outputAtomic)} PEPEW</div>
-                      <div>{t("wallet.send.consolidateDestination")}: <code style={{ overflowWrap: "anywhere" }}>{fromAddress}</code></div>
+                      {autoEstimate && (
+                        <div>{t("wallet.send.consolidateAutoBudget", {
+                          rounds: autoEstimate.rounds,
+                          fee: formatAtomicAsPepew(autoEstimate.estimatedTotalFeeAtomic),
+                        })}</div>
+                      )}
                     </div>
-                    <p className="muted">
-                      {t("wallet.send.consolidateFeePolicy")}
-                    </p>
-                    {consolidationMode === "auto" && (
-                      <p className="muted">
-                        {t("wallet.send.consolidateAutoBudget", {
-                          rounds: autoMaxRounds,
-                          fee: formatAtomicAsPepew(estimateConsolidationFee(consolidationCap) * BigInt(autoMaxRounds)),
-                        })}
-                      </p>
-                    )}
                     <div className="row">
                       <button className="btn" type="button" disabled={busy}
                         onClick={consolidationMode === "auto" ? startAutoConsolidation : confirmConsolidation}>
@@ -906,7 +894,15 @@ export default function Send() {
                     </div>
                   </div>
                 )}
-                {consolidationTxid && (
+                {consolidationMode === "auto" && consolidationTxid && !busy && !consolidationPreview && (
+                  <button className="btn secondary" type="button" onClick={() => {
+                    setConsolidationTxid(null);
+                    setAutoProgress(null);
+                    setConsolidationResultNote("");
+                    void refreshUtxoState();
+                  }}>{t("wallet.send.refreshUtxos")}</button>
+                )}
+                {consolidationTxid && consolidationMode === "manual" && (
                   <div className="note" role="status">
                     <strong>{t("wallet.send.consolidateSubmitted")}</strong>
                     <div>TxID: <code style={{ overflowWrap: "anywhere" }}>{consolidationTxid}</code></div>
