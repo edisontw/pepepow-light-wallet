@@ -812,6 +812,53 @@ export default function Send() {
                     <option value={80}>80</option>
                   </select>
                 </div>
+                <div className="note">
+                  <div className="field-label">{t("wallet.send.consolidateModeTitle")}</div>
+                  <label className="row">
+                    <input type="radio" name="consolidation-mode" value="manual"
+                      checked={consolidationMode === "manual"} disabled={busy}
+                      onChange={() => { setConsolidationMode("manual"); setConsolidationPreview(null); setAutoProgress(null); }} />
+                    <span>{t("wallet.send.consolidateModeManual")}</span>
+                  </label>
+                  <label className="row">
+                    <input type="radio" name="consolidation-mode" value="auto"
+                      checked={consolidationMode === "auto"} disabled={busy}
+                      onChange={() => { setConsolidationMode("auto"); setConsolidationPreview(null); setAutoProgress(null); }} />
+                    <span>{t("wallet.send.consolidateModeAuto")}</span>
+                  </label>
+                  {consolidationMode === "auto" && (
+                    <>
+                      <label className="field-label" htmlFor="consolidation-rounds">{t("wallet.send.consolidateAutoMaxRounds")}</label>
+                      <select id="consolidation-rounds" className="input" value={autoMaxRounds} disabled={busy}
+                        onChange={(e) => { setAutoMaxRounds(Number(e.target.value)); setConsolidationPreview(null); }}>
+                        <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option>
+                        <option value={5}>5</option>
+                      </select>
+                      <p className="muted" style={{ margin: 0 }}>{t("wallet.send.consolidateAutoWarning")}</p>
+                    </>
+                  )}
+                </div>
+                {autoProgress && (
+                  <div className="note" role="status" aria-live="polite">
+                    <strong>{t("wallet.send.consolidateAutoProgress", {
+                      completed: autoProgress.completedRounds, max: autoProgress.maxRounds,
+                    })}</strong>
+                    <div>{t(`wallet.send.consolidateAutoPhase_${autoProgress.phase}`)}</div>
+                    {autoProgress.eligibleUtxos !== undefined && (
+                      <div>{t("wallet.send.consolidateAutoRemaining", { count: autoProgress.eligibleUtxos })}</div>
+                    )}
+                    {autoProgress.lastTxid && (
+                      <div>TxID: <code style={{ overflowWrap: "anywhere" }}>{autoProgress.lastTxid}</code></div>
+                    )}
+                    {autoPauseRequested && <div>{t("wallet.send.consolidatePausePending")}</div>}
+                    {autoRunningRef.current && (
+                      <button className="btn secondary" type="button" disabled={autoPauseRequested} onClick={pauseAutoConsolidation}>
+                        {t("wallet.send.consolidatePause")}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {consolidationResultNote && <p className="muted" role="status">{consolidationResultNote}</p>}
                 {!consolidationPreview && !consolidationTxid && (
                   <button className="btn secondary" type="button" disabled={busy || !mnemonic} onClick={prepareConsolidation}>
                     {t("wallet.send.consolidatePreviewAction")}
@@ -833,9 +880,18 @@ export default function Send() {
                     <p className="muted">
                       {t("wallet.send.consolidateFeePolicy")}
                     </p>
+                    {consolidationMode === "auto" && (
+                      <p className="muted">
+                        {t("wallet.send.consolidateAutoBudget", {
+                          rounds: autoMaxRounds,
+                          fee: formatAtomicAsPepew(estimateConsolidationFee(consolidationCap) * BigInt(autoMaxRounds)),
+                        })}
+                      </p>
+                    )}
                     <div className="row">
-                      <button className="btn" type="button" disabled={busy} onClick={confirmConsolidation}>
-                        {t("wallet.send.consolidateConfirmAction")}
+                      <button className="btn" type="button" disabled={busy}
+                        onClick={consolidationMode === "auto" ? startAutoConsolidation : confirmConsolidation}>
+                        {t(consolidationMode === "auto" ? "wallet.send.consolidateStartAuto" : "wallet.send.consolidateConfirmAction")}
                       </button>
                       <button className="btn secondary" type="button" disabled={busy} onClick={() => setConsolidationPreview(null)}>
                         {t("wallet.send.consolidateCancelAction")}
