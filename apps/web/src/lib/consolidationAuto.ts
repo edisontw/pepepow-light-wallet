@@ -41,8 +41,8 @@ export function estimateAutoConsolidation(eligibleCount: number, batchSize: numb
   }
   return { rounds, estimatedTotalFeeAtomic };
 }
-export const AUTO_CONSOLIDATION_POLL_MS = 12_000;
-export const AUTO_CONSOLIDATION_MAX_POLLS = 20; // ~4 min/round, no polling storm
+export const AUTO_CONSOLIDATION_POLL_MS = 20_000;
+export const AUTO_CONSOLIDATION_MAX_POLLS = 30; // up to ~10 min/round at 3 indexer requests/min
 
 export type AutoConsolidationPhase = "broadcasting" | "waiting" | "preparing" | "done" | "limit" | "budget" | "paused";
 
@@ -104,7 +104,14 @@ async function waitForRoundConfirmation<T extends ConsolidationCandidate>(
     });
     await delay(pollMs);
     if (opts.isPaused()) return { status: "paused" };
-    const utxos = await opts.getUtxos();
+    let utxos: T[];
+    try {
+      utxos = await opts.getUtxos();
+    } catch {
+      // Indexer read errors are safe to retry within the bounded polling window.
+      // Never retry a broadcast; if the API stays unavailable, pause the session.
+      continue;
+    }
     if (opts.isPaused()) return { status: "paused" };
     const remaining = new Set(utxos.map(getConsolidationOutpoint));
     const spentInputsGone = [...selected].every((outpoint) => !remaining.has(outpoint));
