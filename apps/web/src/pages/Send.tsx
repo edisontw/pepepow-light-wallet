@@ -7,7 +7,8 @@ import AppLayout from "../components/layout/AppLayout";
 import PageCard from "../components/layout/PageCard";
 import { parsePepewToAtomic, PEPEW_DECIMALS } from "../lib/amount";
 import { pepewLightClient, LightAddressBalance, LightUtxo } from "../lib/pepewLightClient";
-import { MAX_CONSOLIDATION_TX_BYTES, prepareConsolidationPlan, type ConsolidationPlan } from "../lib/consolidationPolicy";
+import { MAX_CONSOLIDATION_TX_BYTES, estimateConsolidationFee, prepareConsolidationPlan, type ConsolidationPlan } from "../lib/consolidationPolicy";
+import { MAX_AUTO_CONSOLIDATION_ROUNDS, runAutoConsolidation, type AutoConsolidationProgress } from "../lib/consolidationAuto";
 
 const DEFAULT_PATH = "m/44'/5'/0'/0/0";
 const DEFAULT_FEE = "0.0001";
@@ -272,12 +273,30 @@ export default function Send() {
   const [spentOutpoints, setSpentOutpoints] = useState<Set<string>>(() => loadRecentSpentOutpoints());
   const [consolidationOpen, setConsolidationOpen] = useState(false);
   const [consolidationCap, setConsolidationCap] = useState(40);
+  const [consolidationMode, setConsolidationMode] = useState<"manual" | "auto">("manual");
+  const [autoMaxRounds, setAutoMaxRounds] = useState(5);
+  const [autoProgress, setAutoProgress] = useState<AutoConsolidationProgress | null>(null);
+  const [autoPauseRequested, setAutoPauseRequested] = useState(false);
+  const [consolidationResultNote, setConsolidationResultNote] = useState("");
+  const autoStopRef = useRef(false);
+  const autoRunningRef = useRef(false);
   const [consolidationPreview, setConsolidationPreview] = useState<ConsolidationPlan<LightUtxo> | null>(null);
   const [consolidationBusy, setConsolidationBusy] = useState(false);
   const [consolidationPhase, setConsolidationPhase] = useState("");
   const [consolidationError, setConsolidationError] = useState<string | null>(null);
   const [consolidationTxid, setConsolidationTxid] = useState<string | null>(null);
   const consolidationLock = useRef(false);
+
+  useEffect(() => {
+    const pauseOnBackground = () => {
+      if (document.visibilityState === "hidden" && autoRunningRef.current) autoStopRef.current = true;
+    };
+    document.addEventListener("visibilitychange", pauseOnBackground);
+    return () => {
+      autoStopRef.current = true;
+      document.removeEventListener("visibilitychange", pauseOnBackground);
+    };
+  }, []);
 
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
   const amountAtomic = useMemo(() => parseAtomicInput(amount), [amount]);
@@ -485,6 +504,8 @@ export default function Send() {
     setConsolidationError(null);
     setConsolidationPreview(null);
     setConsolidationTxid(null);
+    setConsolidationResultNote("");
+    setAutoProgress(null);
     try {
       const snapshot = await pepewLightClient.getUtxo(fromAddress);
       const recentlySpent = reconcileRecentSpentOutpoints(snapshot.utxos);
@@ -499,17 +520,11 @@ export default function Send() {
     }
   };
 
-  const confirmConsolidation = async () => {
-    const plan = consolidationPreview;
-    if (!plan || busy || consolidationLock.current) return;
-    consolidationLock.current = true;
-    setConsolidationBusy(true);
-    setConsolidationError(null);
-    setConsolidationPhase(t("wallet.send.consolidateRechecking"));
+  const broadcastConsolidationPlan = async (plan: ConsolidationPlan<LightUtxo>): Promise<string> => {
     const keys = plan.selected.map(outpointKey);
     let broadcastAttempted = false;
     try {
-      // Recheck UTXOs and their amounts immediately before signing.
+      setConsolidationPhase(t("wallet.send.consolidateRechecking"));
       const latest = await pepewLightClient.getUtxo(fromAddress);
       const recentlySpent = reconcileRecentSpentOutpoints(latest.utxos);
       setSpentOutpoints(recentlySpent);
@@ -520,7 +535,7 @@ export default function Send() {
           throw new Error("Inputs changed since preview. Prepare a new batch.");
         }
       }
-      // Verify this browser's seed actually controls the output address.
+      // The one-address wallet may only consolidate to its own locally derived address.
       const node = await deriveFromMnemonic(mnemonic, DEFAULT_PATH);
       if (!node.publicKey || pubkeyToP2PKH(Buffer.from(node.publicKey), PEPEPOW) !== fromAddress) {
         throw new Error("The local signing key does not control this wallet address.");
@@ -530,9 +545,8 @@ export default function Send() {
       setConsolidationPhase(t("wallet.send.consolidateSigning"));
       const wif = await wifFromMnemonic(mnemonic, DEFAULT_PATH, PEPEPOW);
       const rawTx = buildAndSignP2PKH({
-        network: PEPEPOW, utxos: coreInputs, wif,
-        to: fromAddress, amount: plan.outputAtomic.toString(),
-        changeAddress: fromAddress, fee: plan.feeAtomic.toString(),
+        network: PEPEPOW, utxos: coreInputs, wif, to: fromAddress,
+        amount: plan.outputAtomic.toString(), changeAddress: fromAddress, fee: plan.feeAtomic.toString(),
       });
       if (!/^[0-9a-fA-F]+$/.test(rawTx) || rawTx.length % 2 !== 0 || rawTx.length / 2 > MAX_CONSOLIDATION_TX_BYTES) {
         throw new Error("Signed consolidation transaction exceeds the safety limit.");
@@ -549,21 +563,87 @@ export default function Send() {
         throw new Error("Broadcast status could not be verified.");
       }
       markOutpointsSpent(keys);
-      setConsolidationPreview(null);
       setConsolidationTxid(result.txid);
       setTimeout(() => void refreshBalance(), 1500);
+      return result.txid;
     } catch (e) {
-      // Timeouts can follow acceptance; never auto-rebroadcast an uncertain transaction.
-      if (broadcastAttempted) markOutpointsSpent(keys);
+      // A timeout after submission is ambiguous. Never automatically retry these inputs.
+      if (broadcastAttempted) {
+        markOutpointsSpent(keys);
+        throw new Error(t("wallet.send.consolidateBroadcastUncertain"));
+      }
+      throw e;
+    }
+  };
+
+  const confirmConsolidation = async () => {
+    const plan = consolidationPreview;
+    if (!plan || busy || consolidationLock.current) return;
+    consolidationLock.current = true;
+    setConsolidationBusy(true);
+    setConsolidationError(null);
+    setConsolidationResultNote("");
+    try {
+      await broadcastConsolidationPlan(plan);
       setConsolidationPreview(null);
-      setConsolidationError(broadcastAttempted
-        ? "Broadcast status uncertain or rejected. Check history and refresh before another batch."
-        : safeError(e, "Consolidation failed. Refresh UTXOs and retry."));
+    } catch (e) {
+      setConsolidationPreview(null);
+      setConsolidationError(safeError(e, t("wallet.send.consolidateFailed")));
     } finally {
       setConsolidationPhase("");
       setConsolidationBusy(false);
       consolidationLock.current = false;
     }
+  };
+
+  const startAutoConsolidation = async () => {
+    const first = consolidationPreview;
+    if (!first || busy || consolidationLock.current) return;
+    consolidationLock.current = true;
+    autoRunningRef.current = true;
+    autoStopRef.current = false;
+    setAutoPauseRequested(false);
+    setConsolidationBusy(true);
+    setConsolidationError(null);
+    setConsolidationResultNote("");
+    setAutoProgress(null);
+    // User explicitly approves at most maxRounds independent fee-paying transactions.
+    try {
+      const outcome = await runAutoConsolidation({
+        initialPlan: first,
+        batchSize: consolidationCap,
+        maxRounds: autoMaxRounds,
+        getUtxos: async () => {
+          const snapshot = await pepewLightClient.getUtxo(fromAddress);
+          setSpentOutpoints(reconcileRecentSpentOutpoints(snapshot.utxos));
+          return snapshot.utxos;
+        },
+        getExcludedOutpoints: () => loadRecentSpentOutpoints(),
+        broadcastRound: broadcastConsolidationPlan,
+        isPaused: () => autoStopRef.current || document.visibilityState === "hidden",
+        onProgress: setAutoProgress,
+      });
+      setConsolidationPreview(null);
+      setConsolidationResultNote(t(`wallet.send.consolidateAutoResult_${outcome.status}`, {
+        completed: outcome.completedRounds, remaining: outcome.eligibleUtxos ?? "?",
+      }));
+    } catch (e) {
+      setConsolidationPreview(null);
+      setConsolidationResultNote(t("wallet.send.consolidateAutoStopped"));
+      setConsolidationError(safeError(e, t("wallet.send.consolidateFailed")));
+    } finally {
+      autoRunningRef.current = false;
+      autoStopRef.current = true;
+      setConsolidationPhase("");
+      setConsolidationBusy(false);
+      consolidationLock.current = false;
+    }
+  };
+
+  const pauseAutoConsolidation = () => {
+    if (!autoRunningRef.current) return;
+    autoStopRef.current = true;
+    setAutoPauseRequested(true);
   };
 
   const handleSendAnother = () => {
