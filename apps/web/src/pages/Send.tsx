@@ -28,6 +28,8 @@ const PREV_TX_RETRY_DELAY_MS = 1200;
 
 type SendPhase = "idle" | "loading_utxos" | "fetching_prevtx" | "signing" | "broadcasting" | "broadcasted" | "error";
 
+class AmbiguousConsolidationBroadcastError extends Error {}
+
 type RecentRecipient = {
   address: string;
   lastUsedAt: number;
@@ -570,7 +572,7 @@ export default function Send() {
       // A timeout after submission is ambiguous. Never automatically retry these inputs.
       if (broadcastAttempted) {
         markOutpointsSpent(keys);
-        throw new Error(t("wallet.send.consolidateBroadcastUncertain"));
+        throw new AmbiguousConsolidationBroadcastError(t("wallet.send.consolidateBroadcastUncertain"));
       }
       throw e;
     }
@@ -588,7 +590,8 @@ export default function Send() {
       setConsolidationPreview(null);
     } catch (e) {
       setConsolidationPreview(null);
-      setConsolidationError(safeError(e, t("wallet.send.consolidateFailed")));
+      setConsolidationError(e instanceof AmbiguousConsolidationBroadcastError
+        ? e.message : safeError(e, t("wallet.send.consolidateFailed")));
     } finally {
       setConsolidationPhase("");
       setConsolidationBusy(false);
@@ -630,7 +633,8 @@ export default function Send() {
     } catch (e) {
       setConsolidationPreview(null);
       setConsolidationResultNote(t("wallet.send.consolidateAutoStopped"));
-      setConsolidationError(safeError(e, t("wallet.send.consolidateFailed")));
+      setConsolidationError(e instanceof AmbiguousConsolidationBroadcastError
+        ? e.message : safeError(e, t("wallet.send.consolidateFailed")));
     } finally {
       autoRunningRef.current = false;
       autoStopRef.current = true;
