@@ -118,6 +118,7 @@ VITE_PEPEW_LIGHT_API_BASE_URL=https://light.pepepow.net
 ```bash
 npm run build
 npm --prefix apps/web run test:client
+npm --prefix apps/web run test:consolidation
 npm --prefix apps/web run test:amount
 npm --prefix packages/wallet-core run test:uint64
 npm --prefix apps/web run scan:readonly-api
