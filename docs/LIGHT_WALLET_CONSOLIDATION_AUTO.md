@@ -5,7 +5,7 @@ Applies to `https://light.pepepow.net/wallet/send`, implemented in `apps/web/src
 ## Modes
 
 - **Manual:** user previews one set of 20, 40 or 80 confirmed UTXOs and explicitly confirms one on-chain transaction.
-- **Automatic:** user previews the first batch, selects a limit of 1, 2, 3 or 5 rounds, reviews the approximate **maximum cumulative fee** and authorizes the entire bounded session once. The wallet submits at most that number of independent transactions; each round requires indexer visibility and confirmation of the **previous** consolidation output before the next round starts.
+- **Automatic:** user previews the first batch, selects a limit of 1, 2, 3, 5 or 10 rounds, reviews the approximate **maximum cumulative fee** and authorizes the entire bounded session once. The wallet submits at most that number of independent transactions; a 10-round session at 80 inputs per round can reduce up to 790 UTXOs (80 inputs become one output per round), so wallets with thousands of UTXOs may require a fresh, user-authorized session; each round requires indexer visibility and confirmation of the **previous** consolidation output before the next round starts.
 - Each transaction merges selected confirmed spendable outputs back into the **same, locally-derived wallet address**, using the existing `wallet-core` browser signer. The API accepts **signed raw transactions only**.
 - The fee estimate is **100,000 atomic units (0.001 PEPEW) per started kB** of estimated legacy P2PKH transaction size; signing checks the *actual* serialized size again before broadcast.
 - No new backend endpoints, wallet addresses, custodial storage, or server-side signing.
@@ -31,7 +31,7 @@ Applies to `https://light.pepepow.net/wallet/send`, implemented in `apps/web/src
 ### Acceptance checklist (requires user with a test wallet)
 
 1. Manual mode preview/cancel; verify own address, fee and number of confirmed inputs.
-2. Auto mode preview shows first-round fee and selected maximum cumulative fee for 1–5 rounds.
+2. Auto mode's compact preview shows input count, first-round fee and selected maximum cumulative fee for 1–10 rounds; it hides technical size, redundant input/output totals and own-address details.
 3. Test with a small set of confirmed UTXOs and no secrets shared to ChatGPT or the server.
 4. Confirm automatic mode does **not** submit the second round while prior consolidation output is unconfirmed.
 5. Confirm Pause stops additional rounds; confirm successful broadcasts show TxID, and Refresh UTXOs reflects indexed state.
