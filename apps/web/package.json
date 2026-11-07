@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test:amount": "rm -rf ./.tmp-tests && tsc --module NodeNext --moduleResolution NodeNext --target ES2020 --outDir ./.tmp-tests ./src/lib/amount.ts && node ./tests/amount.bigint.test.mjs",
     "test:client": "rm -rf ./.tmp-client-test && mkdir -p ./.tmp-client-test && esbuild ./tests/pepewLightClient.test.ts --bundle --platform=node --format=esm --outfile=./.tmp-client-test/pepewLightClient.test.mjs && node ./.tmp-client-test/pepewLightClient.test.mjs",
-    "test:consolidation": "mkdir -p ./.tmp-client-test && esbuild ./tests/consolidationPolicy.test.ts --bundle --platform=node --format=esm --outfile=./.tmp-client-test/consolidationPolicy.test.mjs && node ./.tmp-client-test/consolidationPolicy.test.mjs && esbuild ./tests/consolidationAuto.test.ts --bundle --platform=node --format=esm --outfile=./.tmp-client-test/consolidationAuto.test.mjs && node ./.tmp-client-test/consolidationAuto.test.mjs",
+    "test:consolidation": "mkdir -p ./node_modules/.cache/pepew-tests && esbuild ./tests/consolidationPolicy.test.ts --bundle --platform=node --format=esm --outfile=./node_modules/.cache/pepew-tests/consolidationPolicy.test.mjs && node ./node_modules/.cache/pepew-tests/consolidationPolicy.test.mjs && esbuild ./tests/consolidationAuto.test.ts --bundle --platform=node --format=esm --outfile=./node_modules/.cache/pepew-tests/consolidationAuto.test.mjs && node ./node_modules/.cache/pepew-tests/consolidationAuto.test.mjs",
     "scan:readonly-api": "node ./tests/readOnlyApiScan.mjs"
   },
   "dependencies": {
