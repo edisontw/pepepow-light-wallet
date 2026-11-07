@@ -839,7 +839,7 @@ export default function Send() {
                       <select id="consolidation-rounds" className="input" value={autoMaxRounds} disabled={busy}
                         onChange={(e) => { setAutoMaxRounds(Number(e.target.value)); setConsolidationPreview(null); }}>
                         <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option>
-                        <option value={MAX_AUTO_CONSOLIDATION_ROUNDS}>{MAX_AUTO_CONSOLIDATION_ROUNDS}</option>
+                        <option value={5}>5</option><option value={MAX_AUTO_CONSOLIDATION_ROUNDS}>{MAX_AUTO_CONSOLIDATION_ROUNDS}</option>
                       </select>
                       <p className="muted" style={{ margin: 0 }}>{t("wallet.send.consolidateAutoWarning")}</p>
                     </>
@@ -878,23 +878,15 @@ export default function Send() {
                     <div className="section-title">{t("wallet.send.consolidateConfirmHeading")}</div>
                     <div className="note" style={{ marginTop: 8 }}>
                       <div>{t("wallet.send.consolidateInputs", { selected: consolidationPreview.selected.length, eligible: consolidationPreview.totalCandidates })}</div>
-                      <div>{t("wallet.send.consolidateEstimatedSize", { bytes: consolidationPreview.estimatedBytes })}</div>
-                      <div>{t("wallet.send.consolidateInputTotal")}: {formatAtomicAsPepew(consolidationPreview.totalInAtomic)} PEPEW</div>
                       <div>{t("wallet.send.feeLabel")}: {formatAtomicAsPepew(consolidationPreview.feeAtomic)} PEPEW</div>
-                      <div>{t("wallet.send.consolidateOutput")}: {formatAtomicAsPepew(consolidationPreview.outputAtomic)} PEPEW</div>
-                      <div>{t("wallet.send.consolidateDestination")}: <code style={{ overflowWrap: "anywhere" }}>{fromAddress}</code></div>
-                    </div>
-                    <p className="muted">
-                      {t("wallet.send.consolidateFeePolicy")}
-                    </p>
-                    {consolidationMode === "auto" && (
-                      <p className="muted">
-                        {t("wallet.send.consolidateAutoBudget", {
+                      {consolidationMode === "auto" && (
+                        <div>{t("wallet.send.consolidateAutoBudget", {
                           rounds: autoMaxRounds,
                           fee: formatAtomicAsPepew(estimateConsolidationFee(consolidationCap) * BigInt(autoMaxRounds)),
-                        })}
-                      </p>
-                    )}
+                        })}</div>
+                      )}
+                    </div>
+                    <p className="muted" style={{ margin: 0 }}>{t("wallet.send.consolidateFeePolicy")}</p>
                     <div className="row">
                       <button className="btn" type="button" disabled={busy}
                         onClick={consolidationMode === "auto" ? startAutoConsolidation : confirmConsolidation}>
