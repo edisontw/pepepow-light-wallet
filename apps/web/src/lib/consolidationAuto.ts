@@ -44,7 +44,7 @@ export function estimateAutoConsolidation(eligibleCount: number, batchSize: numb
 export const AUTO_CONSOLIDATION_POLL_MS = 12_000;
 export const AUTO_CONSOLIDATION_MAX_POLLS = 20; // ~4 min/round, no polling storm
 
-export type AutoConsolidationPhase = "broadcasting" | "waiting" | "preparing" | "done" | "limit" | "paused";
+export type AutoConsolidationPhase = "broadcasting" | "waiting" | "preparing" | "done" | "limit" | "budget" | "paused";
 
 export interface AutoConsolidationProgress {
   phase: AutoConsolidationPhase;
@@ -57,7 +57,7 @@ export interface AutoConsolidationProgress {
 }
 
 export interface AutoConsolidationOutcome {
-  status: "done" | "limit" | "paused";
+  status: "done" | "limit" | "budget" | "paused";
   completedRounds: number;
   lastTxid?: string;
   eligibleUtxos?: number;
@@ -67,6 +67,7 @@ export interface AutoConsolidationOptions<T extends ConsolidationCandidate> {
   initialPlan: ConsolidationPlan<T>;
   batchSize: number;
   maxRounds: number;
+  maxTotalFeeAtomic: bigint;
   getUtxos: () => Promise<T[]>;
   getExcludedOutpoints: () => ReadonlySet<string>;
   broadcastRound: (plan: ConsolidationPlan<T>) => Promise<string>;
@@ -133,18 +134,29 @@ export async function runAutoConsolidation<T extends ConsolidationCandidate>(
   if (opts.initialPlan.selected.length < 2 || opts.initialPlan.selected.length > opts.batchSize) {
     throw new Error("Invalid initial consolidation preview.");
   }
+  if (typeof opts.maxTotalFeeAtomic !== "bigint" || opts.maxTotalFeeAtomic <= 0n) {
+    throw new Error("Invalid authorized consolidation fee budget.");
+  }
 
   let plan = opts.initialPlan;
   let lastTxid: string | undefined;
   let completedRounds = 0;
+  let totalFeesAtomic = 0n;
 
   while (completedRounds < opts.maxRounds) {
     if (opts.isPaused()) return { status: "paused", completedRounds, lastTxid };
     const round = completedRounds + 1;
+    // External deposits can change the batch sizes after preview. Stop before any
+    // unapproved fee is spent; each signed fee is checked against the session budget.
+    if (totalFeesAtomic + plan.feeAtomic > opts.maxTotalFeeAtomic) {
+      opts.onProgress({ phase: "budget", round, maxRounds: opts.maxRounds, completedRounds, lastTxid });
+      return { status: "budget", completedRounds, lastTxid };
+    }
     opts.onProgress({ phase: "broadcasting", round, maxRounds: opts.maxRounds, completedRounds, lastTxid });
     const txid = await opts.broadcastRound(plan);
     if (!/^[0-9a-fA-F]{64}$/.test(txid)) throw new Error("Consolidation broadcast returned an invalid txid.");
     lastTxid = txid;
+    totalFeesAtomic += plan.feeAtomic;
     completedRounds += 1;
 
     const confirmation = await waitForRoundConfirmation(opts, plan, txid, completedRounds);
