@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import {
   MAX_AUTO_CONSOLIDATION_ROUNDS,
+  estimateAutoConsolidation,
   runAutoConsolidation,
   type AutoConsolidationProgress,
 } from "../src/lib/consolidationAuto";
-import { prepareConsolidationPlan } from "../src/lib/consolidationPolicy";
+import { estimateConsolidationFee, prepareConsolidationPlan } from "../src/lib/consolidationPolicy";
 
 type Utxo = { txid: string; vout: number; value: number; height: number };
 const txid = (n: number) => n.toString(16).padStart(64, "0");
@@ -20,7 +21,7 @@ async function testCompletesOnlyAfterConfirmation() {
   let pendingTxid = "";
   let lastSpent: Set<string> = new Set();
   const result = await runAutoConsolidation({
-    initialPlan: initial, maxRounds: MAX_AUTO_CONSOLIDATION_ROUNDS, batchSize: 40,
+    initialPlan: initial, maxRounds: MAX_AUTO_CONSOLIDATION_ROUNDS, batchSize: 40, maxTotalFeeAtomic: 10_000_000_000n,
     getExcludedOutpoints: () => new Set(),
     getUtxos: async () => {
       loads += 1;
@@ -54,7 +55,7 @@ async function testNeverContinuesOnUnconfirmedOutput() {
   let broadcasts = 0;
   const result = await runAutoConsolidation({
     initialPlan: prepareConsolidationPlan(initial, new Set(), 40),
-    batchSize: 40, maxRounds: 5,
+    batchSize: 40, maxTotalFeeAtomic: 10_000_000_000n, maxRounds: 5,
     getExcludedOutpoints: () => new Set(),
     broadcastRound: async () => { broadcasts += 1; return txid(999); },
     getUtxos: async () => [...initial.filter((u) => u.txid !== txid(1)), { txid: txid(999), vout: 0, height: 0, value: 5_000_000 }],
@@ -69,7 +70,7 @@ async function testStopBetweenRounds() {
   let pause = false;
   const result = await runAutoConsolidation({
     initialPlan: prepareConsolidationPlan(initial, new Set(), 40),
-    batchSize: 40, maxRounds: 5,
+    batchSize: 40, maxTotalFeeAtomic: 10_000_000_000n, maxRounds: 5,
     getExcludedOutpoints: () => new Set(),
     broadcastRound: async () => { broadcasts += 1; pause = true; return txid(999); },
     getUtxos: async () => { throw Error("must not poll after pause"); },
@@ -85,7 +86,7 @@ async function testMaxRounds() {
   let out = "";
   const result = await runAutoConsolidation({
     initialPlan: prepareConsolidationPlan(current, new Set(), 20),
-    batchSize: 20, maxRounds: 2,
+    batchSize: 20, maxTotalFeeAtomic: 10_000_000_000n, maxRounds: 2,
     getExcludedOutpoints: () => new Set(),
     broadcastRound: async (plan) => {
       broadcasts += 1;
@@ -106,7 +107,7 @@ async function testMaxRounds() {
 async function testInvalidLimitsAndAmbiguousBroadcast() {
   const initial = prepareConsolidationPlan(snapshot(4), new Set(), 4);
   const options = {
-    initialPlan: initial, batchSize: 4, maxRounds: 6, getExcludedOutpoints: () => new Set(),
+    initialPlan: initial, batchSize: 4, maxTotalFeeAtomic: 10_000_000_000n, maxRounds: MAX_AUTO_CONSOLIDATION_ROUNDS + 1, getExcludedOutpoints: () => new Set(),
     broadcastRound: async () => txid(200),
     getUtxos: async () => snapshot(4), isPaused: () => false, onProgress: () => {},
   };
@@ -119,6 +120,85 @@ async function testInvalidLimitsAndAmbiguousBroadcast() {
   }), /uncertain/);
   assert.equal(attempts, 1);
 }
+
+function testAutoSessionEstimates() {
+  const small = estimateAutoConsolidation(2, 20);
+  assert.equal(small.rounds, 1);
+  assert.equal(small.estimatedTotalFeeAtomic, estimateConsolidationFee(2));
+  const medium = estimateAutoConsolidation(180, 80);
+  assert.equal(medium.rounds, 3);
+  assert.equal(medium.estimatedTotalFeeAtomic,
+    estimateConsolidationFee(80) * 2n + estimateConsolidationFee(22));
+  const thousand = estimateAutoConsolidation(1000, 80);
+  assert.equal(thousand.rounds, 13);
+  assert.ok(thousand.estimatedTotalFeeAtomic > 0n);
+  assert.throws(() => estimateAutoConsolidation(79_002, 80), /Too many UTXOs/);
+  assert.throws(() => estimateAutoConsolidation(1, 40), /At least two/);
+}
+
+async function testOneApprovalCompletesThousandUtxos() {
+  let current = snapshot(1000);
+  const estimate = estimateAutoConsolidation(current.length, 80);
+  let broadcasts = 0;
+  let selectedOutpoints = new Set<string>();
+  let newlyBroadcast = "";
+  const initialPlan = prepareConsolidationPlan(current, new Set(), 80);
+  const result = await runAutoConsolidation({
+    initialPlan, batchSize: 80, maxRounds: estimate.rounds,
+    maxTotalFeeAtomic: estimate.estimatedTotalFeeAtomic,
+    getExcludedOutpoints: () => new Set(),
+    broadcastRound: async (plan) => {
+      broadcasts += 1;
+      selectedOutpoints = new Set(plan.selected.map((u) => `${u.txid}:${u.vout}`));
+      newlyBroadcast = txid(10000 + broadcasts);
+      return newlyBroadcast;
+    },
+    getUtxos: async () => {
+      current = current.filter((u) => !selectedOutpoints.has(`${u.txid}:${u.vout}`));
+      current.push({ txid: newlyBroadcast, vout: 0, value: 5_000_000, height: 200 });
+      return current;
+    },
+    isPaused: () => false, onProgress: () => {},
+    delay: async () => {}, pollMs: 0, maxPolls: 1,
+  });
+  assert.equal(result.status, "done");
+  assert.equal(result.completedRounds, estimate.rounds);
+  assert.equal(broadcasts, 13);
+  assert.equal(current.length, 1);
+}
+
+async function testFeeBudgetStopsBeforeAnotherBroadcast() {
+  let current = snapshot(100);
+  const firstPlan = prepareConsolidationPlan(current, new Set(), 40);
+  let broadcasts = 0;
+  let spent = new Set<string>();
+  let returnedTxid = "";
+  const result = await runAutoConsolidation({
+    initialPlan: firstPlan, batchSize: 40, maxRounds: 10,
+    maxTotalFeeAtomic: firstPlan.feeAtomic,
+    getExcludedOutpoints: () => new Set(),
+    broadcastRound: async (plan) => {
+      broadcasts += 1;
+      spent = new Set(plan.selected.map((u) => `${u.txid}:${u.vout}`));
+      returnedTxid = txid(9000 + broadcasts);
+      return returnedTxid;
+    },
+    getUtxos: async () => {
+      current = current.filter((u) => !spent.has(`${u.txid}:${u.vout}`));
+      current.push({ txid: returnedTxid, vout: 0, height: 200, value: 5_000_000 });
+      return current;
+    },
+    isPaused: () => false, onProgress: () => {}, delay: async () => {}, pollMs: 0, maxPolls: 1,
+  });
+  assert.equal(result.status, "budget");
+  assert.equal(result.completedRounds, 1);
+  assert.equal(broadcasts, 1);
+}
+
+testAutoSessionEstimates();
+await testOneApprovalCompletesThousandUtxos();
+await testFeeBudgetStopsBeforeAnotherBroadcast();
+
 await testCompletesOnlyAfterConfirmation();
 await testNeverContinuesOnUnconfirmedOutput();
 await testStopBetweenRounds();
