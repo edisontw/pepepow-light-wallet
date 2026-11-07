@@ -1,0 +1,36 @@
+name: Light Wallet consolidation
+
+on:
+  push:
+    paths:
+      - ".github/workflows/light-wallet-consolidation.yml"
+      - "apps/web/src/pages/Send.tsx"
+      - "apps/web/src/lib/consolidationPolicy.ts"
+      - "apps/web/tests/consolidationPolicy.test.ts"
+      - "apps/web/package.json"
+      - "apps/web/src/i18n.ts"
+      - "packages/wallet-core/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+      - name: Install wallet-core dependencies
+        run: npm ci --prefix packages/wallet-core
+      - name: Install web dependencies
+        run: npm ci --prefix apps/web
+      - name: Build wallet-core
+        run: npm --prefix packages/wallet-core run build
+      - name: Consolidation policy tests
+        run: npm --prefix apps/web run test:consolidation
+      - name: Build web wallet
+        run: npm --prefix apps/web run build
