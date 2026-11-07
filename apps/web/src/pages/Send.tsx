@@ -481,7 +481,7 @@ export default function Send() {
     }
     consolidationLock.current = true;
     setConsolidationBusy(true);
-    setConsolidationPhase("Loading confirmed UTXOs...");
+    setConsolidationPhase(t("wallet.send.consolidateLoading"));
     setConsolidationError(null);
     setConsolidationPreview(null);
     setConsolidationTxid(null);
@@ -505,7 +505,7 @@ export default function Send() {
     consolidationLock.current = true;
     setConsolidationBusy(true);
     setConsolidationError(null);
-    setConsolidationPhase("Rechecking confirmed inputs...");
+    setConsolidationPhase(t("wallet.send.consolidateRechecking"));
     const keys = plan.selected.map(outpointKey);
     let broadcastAttempted = false;
     try {
@@ -525,9 +525,9 @@ export default function Send() {
       if (!node.publicKey || pubkeyToP2PKH(Buffer.from(node.publicKey), PEPEPOW) !== fromAddress) {
         throw new Error("The local signing key does not control this wallet address.");
       }
-      setConsolidationPhase("Fetching previous transactions...");
+      setConsolidationPhase(t("wallet.send.consolidateFetching"));
       const coreInputs = await fetchCoreUtxosWithLimit(plan.selected);
-      setConsolidationPhase("Signing locally...");
+      setConsolidationPhase(t("wallet.send.consolidateSigning"));
       const wif = await wifFromMnemonic(mnemonic, DEFAULT_PATH, PEPEPOW);
       const rawTx = buildAndSignP2PKH({
         network: PEPEPOW, utxos: coreInputs, wif,
@@ -542,7 +542,7 @@ export default function Send() {
       if (plan.feeAtomic < minimumFee) {
         throw new Error("Signed transaction exceeded the fee estimate. Choose a smaller batch.");
       }
-      setConsolidationPhase("Broadcasting signed transaction...");
+      setConsolidationPhase(t("wallet.send.consolidateBroadcasting"));
       broadcastAttempted = true;
       const result = await pepewLightClient.broadcastSignedRawTx(rawTx);
       if (!result.ok || !result.txid || !/^[0-9a-fA-F]{64}$/.test(result.txid)) {
@@ -718,12 +718,10 @@ export default function Send() {
               <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div className="section-title">{t("wallet.send.advancedConsolidate")}</div>
                 <p className="muted" style={{ margin: 0 }}>
-                  Merge confirmed small UTXOs into one output at your own address. This creates a real on-chain
-                  transaction and spends a network fee. Manual single-batch mode only: wait for indexing or
-                  confirmation before starting the next batch.
+                  {t("wallet.send.consolidateDescription")}
                 </p>
                 <div>
-                  <label className="field-label" htmlFor="consolidation-cap">Inputs per batch (maximum 80)</label>
+                  <label className="field-label" htmlFor="consolidation-cap">{t("wallet.send.consolidateBatchSize")}</label>
                   <select id="consolidation-cap" className="input" value={consolidationCap} disabled={busy} onChange={(e) => {
                     setConsolidationCap(Number(e.target.value));
                     setConsolidationPreview(null);
@@ -736,45 +734,44 @@ export default function Send() {
                 </div>
                 {!consolidationPreview && !consolidationTxid && (
                   <button className="btn secondary" type="button" disabled={busy || !mnemonic} onClick={prepareConsolidation}>
-                    Preview consolidation
+                    {t("wallet.send.consolidatePreviewAction")}
                   </button>
                 )}
                 {consolidationPhase && <p className="muted" role="status" style={{ margin: 0 }}>{consolidationPhase}</p>}
                 {consolidationError && <p className="error" role="alert" style={{ margin: 0 }}>{consolidationError}</p>}
                 {consolidationPreview && (
                   <div className="card warning-banner" style={{ margin: 0 }}>
-                    <div className="section-title">Confirm UTXO consolidation</div>
+                    <div className="section-title">{t("wallet.send.consolidateConfirmHeading")}</div>
                     <div className="note" style={{ marginTop: 8 }}>
-                      <div>Confirmed inputs: {consolidationPreview.selected.length} / {consolidationPreview.totalCandidates} eligible</div>
-                      <div>Estimated transaction size: {consolidationPreview.estimatedBytes} bytes</div>
-                      <div>Total input: {formatAtomicAsPepew(consolidationPreview.totalInAtomic)} PEPEW</div>
-                      <div>Network fee: {formatAtomicAsPepew(consolidationPreview.feeAtomic)} PEPEW</div>
-                      <div>Returns to your own address: {formatAtomicAsPepew(consolidationPreview.outputAtomic)} PEPEW</div>
-                      <div>Destination: <code style={{ overflowWrap: "anywhere" }}>{fromAddress}</code></div>
+                      <div>{t("wallet.send.consolidateInputs", { selected: consolidationPreview.selected.length, eligible: consolidationPreview.totalCandidates })}</div>
+                      <div>{t("wallet.send.consolidateEstimatedSize", { bytes: consolidationPreview.estimatedBytes })}</div>
+                      <div>{t("wallet.send.consolidateInputTotal")}: {formatAtomicAsPepew(consolidationPreview.totalInAtomic)} PEPEW</div>
+                      <div>{t("wallet.send.feeLabel")}: {formatAtomicAsPepew(consolidationPreview.feeAtomic)} PEPEW</div>
+                      <div>{t("wallet.send.consolidateOutput")}: {formatAtomicAsPepew(consolidationPreview.outputAtomic)} PEPEW</div>
+                      <div>{t("wallet.send.consolidateDestination")}: <code style={{ overflowWrap: "anywhere" }}>{fromAddress}</code></div>
                     </div>
                     <p className="muted">
-                      Estimated fee: 0.001 PEPEW per started kB (Android v2 policy).
-                      This real transaction cannot be reversed.
+                      {t("wallet.send.consolidateFeePolicy")}
                     </p>
                     <div className="row">
                       <button className="btn" type="button" disabled={busy} onClick={confirmConsolidation}>
-                        Confirm &amp; broadcast
+                        {t("wallet.send.consolidateConfirmAction")}
                       </button>
                       <button className="btn secondary" type="button" disabled={busy} onClick={() => setConsolidationPreview(null)}>
-                        Cancel
+                        {t("wallet.send.consolidateCancelAction")}
                       </button>
                     </div>
                   </div>
                 )}
                 {consolidationTxid && (
                   <div className="note" role="status">
-                    <strong>Consolidation submitted.</strong>
+                    <strong>{t("wallet.send.consolidateSubmitted")}</strong>
                     <div>TxID: <code style={{ overflowWrap: "anywhere" }}>{consolidationTxid}</code></div>
-                    <div>Wait for indexing or confirmation before preparing another batch.</div>
+                    <div>{t("wallet.send.consolidateWait")}</div>
                     <button className="btn secondary" type="button" disabled={busy} onClick={() => {
                       setConsolidationTxid(null);
                       void refreshUtxoState();
-                    }}>Refresh UTXOs / Next batch</button>
+                    }}>{t("wallet.send.consolidateNextBatch")}</button>
                   </div>
                 )}
               </div>
