@@ -274,7 +274,7 @@ export default function Send() {
   const [consolidationOpen, setConsolidationOpen] = useState(false);
   const [consolidationCap, setConsolidationCap] = useState(40);
   const [consolidationMode, setConsolidationMode] = useState<"manual" | "auto">("manual");
-  const [autoMaxRounds, setAutoMaxRounds] = useState(5);
+  const [autoMaxRounds, setAutoMaxRounds] = useState(MAX_AUTO_CONSOLIDATION_ROUNDS);
   const [autoProgress, setAutoProgress] = useState<AutoConsolidationProgress | null>(null);
   const [autoPauseRequested, setAutoPauseRequested] = useState(false);
   const [consolidationResultNote, setConsolidationResultNote] = useState("");
@@ -832,7 +832,7 @@ export default function Send() {
                       <select id="consolidation-rounds" className="input" value={autoMaxRounds} disabled={busy}
                         onChange={(e) => { setAutoMaxRounds(Number(e.target.value)); setConsolidationPreview(null); }}>
                         <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option>
-                        <option value={5}>5</option>
+                        <option value={MAX_AUTO_CONSOLIDATION_ROUNDS}>{MAX_AUTO_CONSOLIDATION_ROUNDS}</option>
                       </select>
                       <p className="muted" style={{ margin: 0 }}>{t("wallet.send.consolidateAutoWarning")}</p>
                     </>
