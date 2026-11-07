@@ -27,16 +27,11 @@ export function estimateConsolidationFee(inputCount: number): bigint {
   return ((estimatedBytes + 999n) / 1000n) * CONSOLIDATION_FEE_PER_KB_ATOMIC;
 }
 
-export function selectConfirmedConsolidationUtxos<T extends ConsolidationCandidate>(
+function eligibleConfirmedUtxos<T extends ConsolidationCandidate>(
   utxos: T[],
   excludedOutpoints: ReadonlySet<string>,
-  maxInputs: number,
 ): T[] {
-  if (!Number.isInteger(maxInputs) || maxInputs < MIN_CONSOLIDATION_INPUTS || maxInputs > MAX_CONSOLIDATION_INPUTS) {
-    throw new Error("Invalid consolidation batch size.");
-  }
   if (!Array.isArray(utxos)) throw new Error("Invalid UTXO response.");
-
   const seen = new Set<string>();
   return utxos
     .filter((utxo) => {
@@ -49,8 +44,18 @@ export function selectConfirmedConsolidationUtxos<T extends ConsolidationCandida
       seen.add(key);
       return true;
     })
-    .sort((a, b) => a.value - b.value || a.txid.localeCompare(b.txid) || a.vout - b.vout)
-    .slice(0, maxInputs);
+    .sort((a, b) => a.value - b.value || a.txid.localeCompare(b.txid) || a.vout - b.vout);
+}
+
+export function selectConfirmedConsolidationUtxos<T extends ConsolidationCandidate>(
+  utxos: T[],
+  excludedOutpoints: ReadonlySet<string>,
+  maxInputs: number,
+): T[] {
+  if (!Number.isInteger(maxInputs) || maxInputs < MIN_CONSOLIDATION_INPUTS || maxInputs > MAX_CONSOLIDATION_INPUTS) {
+    throw new Error("Invalid consolidation batch size.");
+  }
+  return eligibleConfirmedUtxos(utxos, excludedOutpoints).slice(0, maxInputs);
 }
 
 export interface ConsolidationPlan<T extends ConsolidationCandidate> {
@@ -67,7 +72,7 @@ export function prepareConsolidationPlan<T extends ConsolidationCandidate>(
   excludedOutpoints: ReadonlySet<string>,
   maxInputs: number,
 ): ConsolidationPlan<T> {
-  const eligible = selectConfirmedConsolidationUtxos(utxos, excludedOutpoints, MAX_CONSOLIDATION_INPUTS);
+  const eligible = eligibleConfirmedUtxos(utxos, excludedOutpoints);
   if (eligible.length < MIN_CONSOLIDATION_INPUTS) {
     throw new Error("At least two confirmed, unspent UTXOs are needed for consolidation.");
   }
