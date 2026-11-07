@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Buffer } from "buffer";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { buildAndSignP2PKH, PEPEPOW, selectUtxos, type UTXO, wifFromMnemonic } from "@pepepow/wallet-core";
+import { buildAndSignP2PKH, deriveFromMnemonic, PEPEPOW, pubkeyToP2PKH, selectUtxos, type UTXO, wifFromMnemonic } from "@pepepow/wallet-core";
 import AppLayout from "../components/layout/AppLayout";
 import PageCard from "../components/layout/PageCard";
 import { parsePepewToAtomic, PEPEW_DECIMALS } from "../lib/amount";
 import { pepewLightClient, LightAddressBalance, LightUtxo } from "../lib/pepewLightClient";
+import { MAX_CONSOLIDATION_TX_BYTES, prepareConsolidationPlan, type ConsolidationPlan } from "../lib/consolidationPolicy";
 
 const DEFAULT_PATH = "m/44'/5'/0'/0/0";
 const DEFAULT_FEE = "0.0001";
@@ -268,6 +270,14 @@ export default function Send() {
   const [broadcastTxid, setBroadcastTxid] = useState<string | null>(null);
   const [attemptedSend, setAttemptedSend] = useState(false);
   const [spentOutpoints, setSpentOutpoints] = useState<Set<string>>(() => loadRecentSpentOutpoints());
+  const [consolidationOpen, setConsolidationOpen] = useState(false);
+  const [consolidationCap, setConsolidationCap] = useState(40);
+  const [consolidationPreview, setConsolidationPreview] = useState<ConsolidationPlan<LightUtxo> | null>(null);
+  const [consolidationBusy, setConsolidationBusy] = useState(false);
+  const [consolidationPhase, setConsolidationPhase] = useState("");
+  const [consolidationError, setConsolidationError] = useState<string | null>(null);
+  const [consolidationTxid, setConsolidationTxid] = useState<string | null>(null);
+  const consolidationLock = useRef(false);
 
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
   const amountAtomic = useMemo(() => parseAtomicInput(amount), [amount]);
@@ -292,7 +302,7 @@ export default function Send() {
     return null;
   }, [fromAddress, mnemonic, normalizedTo, amountAtomic, feeAtomic, recipientAmountAtomic, totalSpentAtomic]);
 
-  const busy = phase === "loading_utxos" || phase === "fetching_prevtx" || phase === "signing" || phase === "broadcasting";
+  const busy = consolidationBusy || phase === "loading_utxos" || phase === "fetching_prevtx" || phase === "signing" || phase === "broadcasting";
   const displayValidationError = attemptedSend ? validationError : null;
 
   const refreshBalance = async () => {
@@ -452,6 +462,7 @@ export default function Send() {
     setError(null);
     setPreview(null);
     setBroadcastTxid(null);
+    setConsolidationPreview(null);
     try {
       const utxoResult = await pepewLightClient.getUtxo(fromAddress);
       setSpentOutpoints(reconcileRecentSpentOutpoints(utxoResult.utxos));
@@ -460,6 +471,94 @@ export default function Send() {
     }
     await refreshBalance();
     if (phase === "error") setPhase("idle");
+  };
+
+  const prepareConsolidation = async () => {
+    if (busy || consolidationLock.current) return;
+    if (!mnemonic || !fromAddress) {
+      setConsolidationError("Import a wallet with local signing keys before consolidating.");
+      return;
+    }
+    consolidationLock.current = true;
+    setConsolidationBusy(true);
+    setConsolidationPhase("Loading confirmed UTXOs...");
+    setConsolidationError(null);
+    setConsolidationPreview(null);
+    setConsolidationTxid(null);
+    try {
+      const snapshot = await pepewLightClient.getUtxo(fromAddress);
+      const recentlySpent = reconcileRecentSpentOutpoints(snapshot.utxos);
+      setSpentOutpoints(recentlySpent);
+      setConsolidationPreview(prepareConsolidationPlan(snapshot.utxos, recentlySpent, consolidationCap));
+    } catch (e) {
+      setConsolidationError(safeError(e, "Unable to prepare consolidation. Refresh UTXOs and retry."));
+    } finally {
+      setConsolidationPhase("");
+      setConsolidationBusy(false);
+      consolidationLock.current = false;
+    }
+  };
+
+  const confirmConsolidation = async () => {
+    const plan = consolidationPreview;
+    if (!plan || busy || consolidationLock.current) return;
+    consolidationLock.current = true;
+    setConsolidationBusy(true);
+    setConsolidationError(null);
+    setConsolidationPhase("Rechecking confirmed inputs...");
+    const keys = plan.selected.map(outpointKey);
+    let broadcastAttempted = false;
+    try {
+      // Recheck UTXOs and their amounts immediately before signing.
+      const latest = await pepewLightClient.getUtxo(fromAddress);
+      const recentlySpent = reconcileRecentSpentOutpoints(latest.utxos);
+      setSpentOutpoints(recentlySpent);
+      const current = new Map(latest.utxos.map((u) => [outpointKey(u), u]));
+      for (const input of plan.selected) {
+        const fresh = current.get(outpointKey(input));
+        if (!fresh || fresh.height <= 0 || fresh.value !== input.value || recentlySpent.has(outpointKey(input))) {
+          throw new Error("Inputs changed since preview. Prepare a new batch.");
+        }
+      }
+      // Verify this browser's seed actually controls the output address.
+      const node = await deriveFromMnemonic(mnemonic, DEFAULT_PATH);
+      if (!node.publicKey || pubkeyToP2PKH(Buffer.from(node.publicKey), PEPEPOW) !== fromAddress) {
+        throw new Error("The local signing key does not control this wallet address.");
+      }
+      setConsolidationPhase("Fetching previous transactions...");
+      const coreInputs = await fetchCoreUtxosWithLimit(plan.selected);
+      setConsolidationPhase("Signing locally...");
+      const wif = await wifFromMnemonic(mnemonic, DEFAULT_PATH, PEPEPOW);
+      const rawTx = buildAndSignP2PKH({
+        network: PEPEPOW, utxos: coreInputs, wif,
+        to: fromAddress, amount: plan.outputAtomic.toString(),
+        changeAddress: fromAddress, fee: plan.feeAtomic.toString(),
+      });
+      if (!/^[0-9a-fA-F]+$/.test(rawTx) || rawTx.length % 2 !== 0 || rawTx.length / 2 > MAX_CONSOLIDATION_TX_BYTES) {
+        throw new Error("Signed consolidation transaction exceeds the safety limit.");
+      }
+      setConsolidationPhase("Broadcasting signed transaction...");
+      broadcastAttempted = true;
+      const result = await pepewLightClient.broadcastSignedRawTx(rawTx);
+      if (!result.ok || !result.txid || !/^[0-9a-fA-F]{64}$/.test(result.txid)) {
+        throw new Error("Broadcast status could not be verified.");
+      }
+      markOutpointsSpent(keys);
+      setConsolidationPreview(null);
+      setConsolidationTxid(result.txid);
+      setTimeout(() => void refreshBalance(), 1500);
+    } catch (e) {
+      // Timeouts can follow acceptance; never auto-rebroadcast an uncertain transaction.
+      if (broadcastAttempted) markOutpointsSpent(keys);
+      setConsolidationPreview(null);
+      setConsolidationError(broadcastAttempted
+        ? "Broadcast status uncertain or rejected. Check history and refresh before another batch."
+        : safeError(e, "Consolidation failed. Refresh UTXOs and retry."));
+    } finally {
+      setConsolidationPhase("");
+      setConsolidationBusy(false);
+      consolidationLock.current = false;
+    }
   };
 
   const handleSendAnother = () => {
