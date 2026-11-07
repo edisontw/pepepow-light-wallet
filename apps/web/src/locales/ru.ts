@@ -412,7 +412,7 @@ export const ru = {
         consolidateAutoPhase_limit: "Достигнут лимит раундов",
         consolidateAutoPhase_budget: "Достигнут разрешённый лимит комиссии; дальнейшие транзакции остановлены.",
         consolidateAutoPhase_paused: "Автоматическая консолидация приостановлена",
-        consolidateAutoResult_done: "Выполнено {{completed}} раундов. Осталось {{remaining}} доступных UTXO.",
+        consolidateAutoResult_done: "Автоматическая консолидация завершена за {{completed}} раундов. Осталось {{remaining}} подтверждённых UTXO; дальнейшее объединение не требуется.",
         consolidateAutoResult_limit: "Лимит: {{completed}} раундов. Осталось {{remaining}} UTXO; повторите просмотр позже.",
         consolidateAutoResult_budget: "Завершено {{completed}} раундов. Лимит комиссии достигнут; проверьте транзакции перед новым сеансом.",
         consolidateAutoResult_paused: "Выполнено {{completed}} раундов, затем процесс приостановлен. Проверьте историю перед новой попыткой.",
