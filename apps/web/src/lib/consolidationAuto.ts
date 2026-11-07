@@ -6,7 +6,7 @@ import {
   type ConsolidationPlan,
 } from "./consolidationPolicy";
 
-export const MAX_AUTO_CONSOLIDATION_ROUNDS = 5;
+export const MAX_AUTO_CONSOLIDATION_ROUNDS = 10;
 export const AUTO_CONSOLIDATION_POLL_MS = 12_000;
 export const AUTO_CONSOLIDATION_MAX_POLLS = 20; // ~4 min/round, no polling storm
 
@@ -83,7 +83,7 @@ async function waitForRoundConfirmation<T extends ConsolidationCandidate>(
 }
 
 /**
- * Single browser session, max five user-authorized rounds.
+ * Single browser session, max ten user-authorized rounds.
  * Each accepted transaction must be indexed AND confirmed before the next round.
  * Never retries a failed or ambiguous broadcast; never automatically resumes on reload.
  */
