@@ -24,7 +24,7 @@ Phase 4.5 / Phase 5 development focuses on making the public ElectrumX-based web
 - friendly API / address / network error handling
 - client-side transaction construction and signing
 - signed raw transaction broadcast only
-- manual single-batch UTXO consolidation (20/40/80 inputs), with local signing, confirmation preview, and recently-spent protection; automatic multi-round mode is not yet enabled
+- manual and bounded automatic UTXO consolidation (20/40/80 confirmed inputs per transaction, up to 5 automatic rounds) with local signing, preview, confirmation checks, pause, and recently-spent protection
 - public PEPEW Light information APIs for price, market, and network status
 
 ## Security boundary
@@ -119,6 +119,7 @@ VITE_PEPEW_LIGHT_API_BASE_URL=https://light.pepepow.net
 npm run build
 npm --prefix apps/web run test:client
 npm --prefix apps/web run test:consolidation
+# Includes automatic consolidation flow tests
 npm --prefix apps/web run test:amount
 npm --prefix packages/wallet-core run test:uint64
 npm --prefix apps/web run scan:readonly-api

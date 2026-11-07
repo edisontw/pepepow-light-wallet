@@ -49,7 +49,7 @@ npm --prefix apps/web ci
 ```bash
 npm run test:uint64
 npm run test:client
-npm --prefix apps/web run test:consolidation
+npm --prefix apps/web run test:consolidation  # manual policy + auto flow tests
 npm run test:amount
 npm run build
 npm run scan:readonly-api

@@ -7,7 +7,8 @@ import AppLayout from "../components/layout/AppLayout";
 import PageCard from "../components/layout/PageCard";
 import { parsePepewToAtomic, PEPEW_DECIMALS } from "../lib/amount";
 import { pepewLightClient, LightAddressBalance, LightUtxo } from "../lib/pepewLightClient";
-import { MAX_CONSOLIDATION_TX_BYTES, prepareConsolidationPlan, type ConsolidationPlan } from "../lib/consolidationPolicy";
+import { MAX_CONSOLIDATION_TX_BYTES, estimateConsolidationFee, prepareConsolidationPlan, type ConsolidationPlan } from "../lib/consolidationPolicy";
+import { MAX_AUTO_CONSOLIDATION_ROUNDS, runAutoConsolidation, type AutoConsolidationProgress } from "../lib/consolidationAuto";
 
 const DEFAULT_PATH = "m/44'/5'/0'/0/0";
 const DEFAULT_FEE = "0.0001";
@@ -26,6 +27,8 @@ const PREV_TX_RETRY_ATTEMPTS = 4;
 const PREV_TX_RETRY_DELAY_MS = 1200;
 
 type SendPhase = "idle" | "loading_utxos" | "fetching_prevtx" | "signing" | "broadcasting" | "broadcasted" | "error";
+
+class AmbiguousConsolidationBroadcastError extends Error {}
 
 type RecentRecipient = {
   address: string;
@@ -272,12 +275,30 @@ export default function Send() {
   const [spentOutpoints, setSpentOutpoints] = useState<Set<string>>(() => loadRecentSpentOutpoints());
   const [consolidationOpen, setConsolidationOpen] = useState(false);
   const [consolidationCap, setConsolidationCap] = useState(40);
+  const [consolidationMode, setConsolidationMode] = useState<"manual" | "auto">("manual");
+  const [autoMaxRounds, setAutoMaxRounds] = useState(MAX_AUTO_CONSOLIDATION_ROUNDS);
+  const [autoProgress, setAutoProgress] = useState<AutoConsolidationProgress | null>(null);
+  const [autoPauseRequested, setAutoPauseRequested] = useState(false);
+  const [consolidationResultNote, setConsolidationResultNote] = useState("");
+  const autoStopRef = useRef(false);
+  const autoRunningRef = useRef(false);
   const [consolidationPreview, setConsolidationPreview] = useState<ConsolidationPlan<LightUtxo> | null>(null);
   const [consolidationBusy, setConsolidationBusy] = useState(false);
   const [consolidationPhase, setConsolidationPhase] = useState("");
   const [consolidationError, setConsolidationError] = useState<string | null>(null);
   const [consolidationTxid, setConsolidationTxid] = useState<string | null>(null);
   const consolidationLock = useRef(false);
+
+  useEffect(() => {
+    const pauseOnBackground = () => {
+      if (document.visibilityState === "hidden" && autoRunningRef.current) autoStopRef.current = true;
+    };
+    document.addEventListener("visibilitychange", pauseOnBackground);
+    return () => {
+      autoStopRef.current = true;
+      document.removeEventListener("visibilitychange", pauseOnBackground);
+    };
+  }, []);
 
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
   const amountAtomic = useMemo(() => parseAtomicInput(amount), [amount]);
@@ -485,6 +506,8 @@ export default function Send() {
     setConsolidationError(null);
     setConsolidationPreview(null);
     setConsolidationTxid(null);
+    setConsolidationResultNote("");
+    setAutoProgress(null);
     try {
       const snapshot = await pepewLightClient.getUtxo(fromAddress);
       const recentlySpent = reconcileRecentSpentOutpoints(snapshot.utxos);
@@ -499,17 +522,11 @@ export default function Send() {
     }
   };
 
-  const confirmConsolidation = async () => {
-    const plan = consolidationPreview;
-    if (!plan || busy || consolidationLock.current) return;
-    consolidationLock.current = true;
-    setConsolidationBusy(true);
-    setConsolidationError(null);
-    setConsolidationPhase(t("wallet.send.consolidateRechecking"));
+  const broadcastConsolidationPlan = async (plan: ConsolidationPlan<LightUtxo>): Promise<string> => {
     const keys = plan.selected.map(outpointKey);
     let broadcastAttempted = false;
     try {
-      // Recheck UTXOs and their amounts immediately before signing.
+      setConsolidationPhase(t("wallet.send.consolidateRechecking"));
       const latest = await pepewLightClient.getUtxo(fromAddress);
       const recentlySpent = reconcileRecentSpentOutpoints(latest.utxos);
       setSpentOutpoints(recentlySpent);
@@ -520,7 +537,7 @@ export default function Send() {
           throw new Error("Inputs changed since preview. Prepare a new batch.");
         }
       }
-      // Verify this browser's seed actually controls the output address.
+      // The one-address wallet may only consolidate to its own locally derived address.
       const node = await deriveFromMnemonic(mnemonic, DEFAULT_PATH);
       if (!node.publicKey || pubkeyToP2PKH(Buffer.from(node.publicKey), PEPEPOW) !== fromAddress) {
         throw new Error("The local signing key does not control this wallet address.");
@@ -530,9 +547,8 @@ export default function Send() {
       setConsolidationPhase(t("wallet.send.consolidateSigning"));
       const wif = await wifFromMnemonic(mnemonic, DEFAULT_PATH, PEPEPOW);
       const rawTx = buildAndSignP2PKH({
-        network: PEPEPOW, utxos: coreInputs, wif,
-        to: fromAddress, amount: plan.outputAtomic.toString(),
-        changeAddress: fromAddress, fee: plan.feeAtomic.toString(),
+        network: PEPEPOW, utxos: coreInputs, wif, to: fromAddress,
+        amount: plan.outputAtomic.toString(), changeAddress: fromAddress, fee: plan.feeAtomic.toString(),
       });
       if (!/^[0-9a-fA-F]+$/.test(rawTx) || rawTx.length % 2 !== 0 || rawTx.length / 2 > MAX_CONSOLIDATION_TX_BYTES) {
         throw new Error("Signed consolidation transaction exceeds the safety limit.");
@@ -549,21 +565,92 @@ export default function Send() {
         throw new Error("Broadcast status could not be verified.");
       }
       markOutpointsSpent(keys);
-      setConsolidationPreview(null);
       setConsolidationTxid(result.txid);
       setTimeout(() => void refreshBalance(), 1500);
+      return result.txid;
     } catch (e) {
-      // Timeouts can follow acceptance; never auto-rebroadcast an uncertain transaction.
-      if (broadcastAttempted) markOutpointsSpent(keys);
+      // A timeout after submission is ambiguous. Never automatically retry these inputs.
+      if (broadcastAttempted) {
+        markOutpointsSpent(keys);
+        throw new AmbiguousConsolidationBroadcastError(t("wallet.send.consolidateBroadcastUncertain"));
+      }
+      throw e;
+    }
+  };
+
+  const confirmConsolidation = async () => {
+    const plan = consolidationPreview;
+    if (!plan || busy || consolidationLock.current) return;
+    consolidationLock.current = true;
+    setConsolidationBusy(true);
+    setConsolidationError(null);
+    setConsolidationResultNote("");
+    try {
+      await broadcastConsolidationPlan(plan);
       setConsolidationPreview(null);
-      setConsolidationError(broadcastAttempted
-        ? "Broadcast status uncertain or rejected. Check history and refresh before another batch."
-        : safeError(e, "Consolidation failed. Refresh UTXOs and retry."));
+    } catch (e) {
+      setConsolidationPreview(null);
+      setConsolidationError(e instanceof AmbiguousConsolidationBroadcastError
+        ? e.message : safeError(e, t("wallet.send.consolidateFailed")));
     } finally {
       setConsolidationPhase("");
       setConsolidationBusy(false);
       consolidationLock.current = false;
     }
+  };
+
+  const startAutoConsolidation = async () => {
+    const first = consolidationPreview;
+    if (!first || busy || consolidationLock.current) return;
+    consolidationLock.current = true;
+    autoRunningRef.current = true;
+    autoStopRef.current = false;
+    setAutoPauseRequested(false);
+    setConsolidationBusy(true);
+    setConsolidationError(null);
+    setConsolidationResultNote("");
+    setAutoProgress(null);
+    // User explicitly approves at most maxRounds independent fee-paying transactions.
+    try {
+      const outcome = await runAutoConsolidation({
+        initialPlan: first,
+        batchSize: consolidationCap,
+        maxRounds: autoMaxRounds,
+        getUtxos: async () => {
+          const snapshot = await pepewLightClient.getUtxo(fromAddress);
+          setSpentOutpoints(reconcileRecentSpentOutpoints(snapshot.utxos));
+          return snapshot.utxos;
+        },
+        getExcludedOutpoints: () => loadRecentSpentOutpoints(),
+        broadcastRound: broadcastConsolidationPlan,
+        isPaused: () => autoStopRef.current || document.visibilityState === "hidden",
+        onProgress: (progress) => {
+          setAutoProgress(progress);
+          if (progress.phase !== "broadcasting") setConsolidationPhase("");
+        },
+      });
+      setConsolidationPreview(null);
+      setConsolidationResultNote(t(`wallet.send.consolidateAutoResult_${outcome.status}`, {
+        completed: outcome.completedRounds, remaining: outcome.eligibleUtxos ?? "?",
+      }));
+    } catch (e) {
+      setConsolidationPreview(null);
+      setConsolidationResultNote(t("wallet.send.consolidateAutoStopped"));
+      setConsolidationError(e instanceof AmbiguousConsolidationBroadcastError
+        ? e.message : safeError(e, t("wallet.send.consolidateFailed")));
+    } finally {
+      autoRunningRef.current = false;
+      autoStopRef.current = true;
+      setConsolidationPhase("");
+      setConsolidationBusy(false);
+      consolidationLock.current = false;
+    }
+  };
+
+  const pauseAutoConsolidation = () => {
+    if (!autoRunningRef.current) return;
+    autoStopRef.current = true;
+    setAutoPauseRequested(true);
   };
 
   const handleSendAnother = () => {
@@ -732,6 +819,53 @@ export default function Send() {
                     <option value={80}>80</option>
                   </select>
                 </div>
+                <div className="note">
+                  <div className="field-label">{t("wallet.send.consolidateModeTitle")}</div>
+                  <label className="row">
+                    <input type="radio" name="consolidation-mode" value="manual"
+                      checked={consolidationMode === "manual"} disabled={busy}
+                      onChange={() => { setConsolidationMode("manual"); setConsolidationPreview(null); setAutoProgress(null); }} />
+                    <span>{t("wallet.send.consolidateModeManual")}</span>
+                  </label>
+                  <label className="row">
+                    <input type="radio" name="consolidation-mode" value="auto"
+                      checked={consolidationMode === "auto"} disabled={busy}
+                      onChange={() => { setConsolidationMode("auto"); setConsolidationPreview(null); setAutoProgress(null); }} />
+                    <span>{t("wallet.send.consolidateModeAuto")}</span>
+                  </label>
+                  {consolidationMode === "auto" && (
+                    <>
+                      <label className="field-label" htmlFor="consolidation-rounds">{t("wallet.send.consolidateAutoMaxRounds")}</label>
+                      <select id="consolidation-rounds" className="input" value={autoMaxRounds} disabled={busy}
+                        onChange={(e) => { setAutoMaxRounds(Number(e.target.value)); setConsolidationPreview(null); }}>
+                        <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option>
+                        <option value={MAX_AUTO_CONSOLIDATION_ROUNDS}>{MAX_AUTO_CONSOLIDATION_ROUNDS}</option>
+                      </select>
+                      <p className="muted" style={{ margin: 0 }}>{t("wallet.send.consolidateAutoWarning")}</p>
+                    </>
+                  )}
+                </div>
+                {autoProgress && (
+                  <div className="note" role="status" aria-live="polite">
+                    <strong>{t("wallet.send.consolidateAutoProgress", {
+                      completed: autoProgress.completedRounds, max: autoProgress.maxRounds,
+                    })}</strong>
+                    <div>{t(`wallet.send.consolidateAutoPhase_${autoProgress.phase}`)}</div>
+                    {autoProgress.eligibleUtxos !== undefined && (
+                      <div>{t("wallet.send.consolidateAutoRemaining", { count: autoProgress.eligibleUtxos })}</div>
+                    )}
+                    {autoProgress.lastTxid && (
+                      <div>TxID: <code style={{ overflowWrap: "anywhere" }}>{autoProgress.lastTxid}</code></div>
+                    )}
+                    {autoPauseRequested && <div>{t("wallet.send.consolidatePausePending")}</div>}
+                    {autoRunningRef.current && (
+                      <button className="btn secondary" type="button" disabled={autoPauseRequested} onClick={pauseAutoConsolidation}>
+                        {t("wallet.send.consolidatePause")}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {consolidationResultNote && <p className="muted" role="status">{consolidationResultNote}</p>}
                 {!consolidationPreview && !consolidationTxid && (
                   <button className="btn secondary" type="button" disabled={busy || !mnemonic} onClick={prepareConsolidation}>
                     {t("wallet.send.consolidatePreviewAction")}
@@ -753,9 +887,18 @@ export default function Send() {
                     <p className="muted">
                       {t("wallet.send.consolidateFeePolicy")}
                     </p>
+                    {consolidationMode === "auto" && (
+                      <p className="muted">
+                        {t("wallet.send.consolidateAutoBudget", {
+                          rounds: autoMaxRounds,
+                          fee: formatAtomicAsPepew(estimateConsolidationFee(consolidationCap) * BigInt(autoMaxRounds)),
+                        })}
+                      </p>
+                    )}
                     <div className="row">
-                      <button className="btn" type="button" disabled={busy} onClick={confirmConsolidation}>
-                        {t("wallet.send.consolidateConfirmAction")}
+                      <button className="btn" type="button" disabled={busy}
+                        onClick={consolidationMode === "auto" ? startAutoConsolidation : confirmConsolidation}>
+                        {t(consolidationMode === "auto" ? "wallet.send.consolidateStartAuto" : "wallet.send.consolidateConfirmAction")}
                       </button>
                       <button className="btn secondary" type="button" disabled={busy} onClick={() => setConsolidationPreview(null)}>
                         {t("wallet.send.consolidateCancelAction")}
