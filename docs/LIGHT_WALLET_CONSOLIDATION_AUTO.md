@@ -5,7 +5,9 @@ Applies to `https://light.pepepow.net/wallet/send`, implemented in `apps/web/src
 ## Modes
 
 - **Manual:** user previews one set of 20, 40 or 80 confirmed UTXOs and explicitly confirms one on-chain transaction.
-- **Automatic:** user previews the first batch, selects a limit of 1, 2, 3, 5 or 10 rounds, reviews the approximate **maximum cumulative fee** and authorizes the entire bounded session once. The wallet submits at most that number of independent transactions; a 10-round session at 80 inputs per round can reduce up to 790 UTXOs (80 inputs become one output per round), so wallets with thousands of UTXOs may require a fresh, user-authorized session; each round requires indexer visibility and confirmation of the **previous** consolidation output before the next round starts.
+- **Automatic:** user previews the first batch, sees the **estimated number of rounds and total fee budget**, and authorizes the full session **once**. There is no per-round user confirmation. The wallet continues until all initially eligible confirmed outputs have been consolidated to one, or a bounded safety halt occurs. Each round requires indexer visibility and on-chain confirmation of the **previous** consolidation output before the next round starts.
+- The estimated round count follows `ceil((N - 1) / (batchSize - 1))`, because each batch replaces 2–80 inputs with one self-return output. For 1,000 eligible UTXOs at batch size 80, this requires 13 rounds.
+- The automatic session has a non-user-adjustable **1,000-round emergency limit** and a **fixed cumulative fee budget** estimated before authorization. If UTXOs change enough to exceed the budget, processing stops before another broadcast. Extremely large wallets beyond the hard limit need another user-approved session.
 - Each transaction merges selected confirmed spendable outputs back into the **same, locally-derived wallet address**, using the existing `wallet-core` browser signer. The API accepts **signed raw transactions only**.
 - The fee estimate is **100,000 atomic units (0.001 PEPEW) per started kB** of estimated legacy P2PKH transaction size; signing checks the *actual* serialized size again before broadcast.
 - No new backend endpoints, wallet addresses, custodial storage, or server-side signing.
@@ -31,10 +33,10 @@ Applies to `https://light.pepepow.net/wallet/send`, implemented in `apps/web/src
 ### Acceptance checklist (requires user with a test wallet)
 
 1. Manual mode preview/cancel; verify own address, fee and number of confirmed inputs.
-2. Auto mode's compact preview shows input count, first-round fee and selected maximum cumulative fee for 1–10 rounds; it hides technical size, redundant input/output totals and own-address details.
+2. Auto mode's compact preview shows input count, first-round fee, automatically estimated total rounds, and maximum authorized cumulative fee. There is no round selector; transaction size, redundant totals, address and technical fee-rate details stay hidden.
 3. Test with a small set of confirmed UTXOs and no secrets shared to ChatGPT or the server.
 4. Confirm automatic mode does **not** submit the second round while prior consolidation output is unconfirmed.
-5. Confirm Pause stops additional rounds; confirm successful broadcasts show TxID, and Refresh UTXOs reflects indexed state.
-6. Confirm API/network errors halt safely without repeat broadcast.
+5. Confirm Pause stops additional rounds; confirm successful broadcasts show TxID, and Refresh UTXOs reflects indexed state. Test a synthetic 1,000-UTXO wallet automatically reaching one output without repeated authorization.
+6. Confirm API/network errors halt safely without repeat broadcast. Check that a fee-budget overrun stops the next round before signing or broadcasting.
 
 Production deployment: use `docs/deploy-light-pepepow-net.md`. Frontend-only static deploy; no ElectrumX, PEPEPOWd or FastAPI restart.
