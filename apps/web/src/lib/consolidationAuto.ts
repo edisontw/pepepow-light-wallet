@@ -1,12 +1,46 @@
 import {
   MAX_CONSOLIDATION_INPUTS,
+  estimateConsolidationFee,
   prepareConsolidationPlan,
   selectConfirmedConsolidationUtxos,
   type ConsolidationCandidate,
   type ConsolidationPlan,
 } from "./consolidationPolicy";
 
-export const MAX_AUTO_CONSOLIDATION_ROUNDS = 10;
+// Emergency guard only; a normal session stops as soon as all eligible UTXOs are consolidated.
+export const MAX_AUTO_CONSOLIDATION_ROUNDS = 1000;
+
+export interface AutoConsolidationEstimate {
+  rounds: number;
+  estimatedTotalFeeAtomic: bigint;
+}
+
+/**
+ * One confirmed self-return output replaces each selected batch.
+ * Preview the exact initial UTXO reduction and estimated cumulative fee.
+ * The plan is a bounded user authorization, not an infinite background job.
+ */
+export function estimateAutoConsolidation(eligibleCount: number, batchSize: number): AutoConsolidationEstimate {
+  if (!Number.isSafeInteger(eligibleCount) || eligibleCount < 2) {
+    throw new Error("At least two eligible UTXOs are required.");
+  }
+  if (!Number.isInteger(batchSize) || batchSize < 2 || batchSize > MAX_CONSOLIDATION_INPUTS) {
+    throw new Error("Invalid consolidation batch size.");
+  }
+  let remaining = eligibleCount;
+  let rounds = 0;
+  let estimatedTotalFeeAtomic = 0n;
+  while (remaining > 1 && rounds < MAX_AUTO_CONSOLIDATION_ROUNDS) {
+    const inputCount = Math.min(remaining, batchSize);
+    estimatedTotalFeeAtomic += estimateConsolidationFee(inputCount);
+    remaining = remaining - inputCount + 1;
+    rounds += 1;
+  }
+  if (remaining > 1) {
+    throw new Error("Too many UTXOs for one automatic session. Increase the batch size or consolidate in stages.");
+  }
+  return { rounds, estimatedTotalFeeAtomic };
+}
 export const AUTO_CONSOLIDATION_POLL_MS = 12_000;
 export const AUTO_CONSOLIDATION_MAX_POLLS = 20; // ~4 min/round, no polling storm
 
@@ -83,7 +117,7 @@ async function waitForRoundConfirmation<T extends ConsolidationCandidate>(
 }
 
 /**
- * Single browser session, max ten user-authorized rounds.
+ * Single browser session, user-authorized number of rounds estimated from initial UTXO count.
  * Each accepted transaction must be indexed AND confirmed before the next round.
  * Never retries a failed or ambiguous broadcast; never automatically resumes on reload.
  */
