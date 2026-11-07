@@ -102,6 +102,7 @@ npm --prefix apps/web ci
 npm run test:uint64
 npm run test:client
 npm run test:amount
+npm --prefix apps/web run test:consolidation
 npm run build
 npm run scan:readonly-api
 
