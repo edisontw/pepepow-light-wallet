@@ -17,7 +17,7 @@ Applies to `https://light.pepepow.net/wallet/send`, implemented in `apps/web/src
 - Maximum **80 inputs** per round; no unconfirmed inputs, duplicate outpoints or locally marked recently-spent outpoints.
 - Before every transaction, re-fetch UTXOs, verify selected outpoints still exist unchanged and confirmed, and verify the locally derived wallet address matches the destination.
 - After a successful broadcast, the next round is blocked until **all previously selected inputs disappear** and the new consolidation output is **confirmed** in the Light API UTXO snapshot.
-- Indexer polling is bounded: **12 seconds** between requests and **20 attempts per round** (normally approximately four minutes, plus API latency). This avoids high-frequency load on the single-core gateway.
+- Indexer polling is bounded: **20 seconds** between requests and **30 attempts per round** (up to approximately 10 minutes, plus API latency). Read-only indexer failures are retried within this window, but transaction broadcasts are never retried. This limits gateway load to about three status polls per minute.
 - If a transaction cannot be verified as indexed/confirmed within the polling window, the loop **pauses**. A rejected, failed or *ambiguous* broadcast is never blindly retried.
 - The **Pause further batches** button prevents another round, but cannot retract an in-flight transaction. After the one-time approval, work can continue while the tab is open in the background; however, browser timer throttling or device sleep can delay or suspend progress. Navigating away or closing the tab stops the session.
 - There is **no automatic resume after reload/navigation**. Check transaction history and obtain a fresh preview before intentionally starting another session.
