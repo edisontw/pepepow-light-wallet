@@ -295,14 +295,9 @@ export default function Send() {
   );
 
   useEffect(() => {
-    const pauseOnBackground = () => {
-      if (document.visibilityState === "hidden" && autoRunningRef.current) autoStopRef.current = true;
-    };
-    document.addEventListener("visibilitychange", pauseOnBackground);
-    return () => {
-      autoStopRef.current = true;
-      document.removeEventListener("visibilitychange", pauseOnBackground);
-    };
+    // Browser-only automation may continue in an open background tab, subject to
+    // browser timer throttling. Navigating away or unmounting stops future rounds.
+    return () => { autoStopRef.current = true; };
   }, []);
 
   const normalizedTo = useMemo(() => normalizeAddressInput(to), [to]);
@@ -633,7 +628,7 @@ export default function Send() {
         },
         getExcludedOutpoints: () => loadRecentSpentOutpoints(),
         broadcastRound: broadcastConsolidationPlan,
-        isPaused: () => autoStopRef.current || document.visibilityState === "hidden",
+        isPaused: () => autoStopRef.current,
         onProgress: (progress) => {
           setAutoProgress(progress);
           if (progress.phase !== "broadcasting") setConsolidationPhase("");
