@@ -401,7 +401,7 @@ export const ru = {
         consolidateModeManual: "Ручной (подтверждать каждый раунд)",
         consolidateModeAuto: "Автоматический (одно подтверждение до завершения)",
         consolidateAutoMaxRounds: "Максимум автоматических раундов",
-        consolidateAutoWarning: "Держите вкладку открытой на переднем плане. При ошибках или отсутствии подтверждений автоматический режим остановится.",
+        consolidateAutoWarning: "Держите вкладку кошелька открытой. Спящий браузер может задержать выполнение. При ошибках или отсутствии подтверждений автоматический режим остановится.",
         consolidateAutoBudget: "Оценка: {{rounds}} раундов, максимальная общая комиссия {{fee}} PEPEW",
         consolidateAutoProgress: "Выполнено {{completed}} / {{max}} раундов",
         consolidateAutoRemaining: "Доступных UTXO осталось: {{count}}",
