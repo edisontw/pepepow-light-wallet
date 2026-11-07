@@ -537,6 +537,11 @@ export default function Send() {
       if (!/^[0-9a-fA-F]+$/.test(rawTx) || rawTx.length % 2 !== 0 || rawTx.length / 2 > MAX_CONSOLIDATION_TX_BYTES) {
         throw new Error("Signed consolidation transaction exceeds the safety limit.");
       }
+      const actualBytes = BigInt(rawTx.length / 2);
+      const minimumFee = ((actualBytes + 999n) / 1000n) * 100_000n;
+      if (plan.feeAtomic < minimumFee) {
+        throw new Error("Signed transaction exceeded the fee estimate. Choose a smaller batch.");
+      }
       setConsolidationPhase("Broadcasting signed transaction...");
       broadcastAttempted = true;
       const result = await pepewLightClient.broadcastSignedRawTx(rawTx);
