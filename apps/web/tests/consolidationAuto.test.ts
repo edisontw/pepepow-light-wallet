@@ -195,6 +195,54 @@ async function testFeeBudgetStopsBeforeAnotherBroadcast() {
   assert.equal(broadcasts, 1);
 }
 
+async function testTransientIndexerErrorRetriesReadWithoutRebroadcast() {
+  const initialUtxos = snapshot(3);
+  const initialPlan = prepareConsolidationPlan(initialUtxos, new Set(), 3);
+  let reads = 0;
+  let broadcasts = 0;
+  const result = await runAutoConsolidation({
+    initialPlan,
+    batchSize: 3,
+    maxRounds: 1,
+    maxTotalFeeAtomic: initialPlan.feeAtomic,
+    getExcludedOutpoints: () => new Set(),
+    broadcastRound: async () => { broadcasts += 1; return txid(10_001); },
+    getUtxos: async () => {
+      reads += 1;
+      if (reads === 1) throw new Error("Temporary indexer error");
+      return [{ txid: txid(10_001), vout: 0, value: 3_000_000, height: 201 }];
+    },
+    isPaused: () => false,
+    onProgress: () => {},
+    delay: async () => {}, pollMs: 0, maxPolls: 3,
+  });
+  assert.equal(result.status, "done");
+  assert.equal(reads, 2);
+  assert.equal(broadcasts, 1);
+}
+
+async function testIndexerStaysUnavailableStopsWithoutRebroadcast() {
+  const initialPlan = prepareConsolidationPlan(snapshot(3), new Set(), 3);
+  let broadcasts = 0;
+  const result = await runAutoConsolidation({
+    initialPlan,
+    batchSize: 3,
+    maxRounds: 1,
+    maxTotalFeeAtomic: initialPlan.feeAtomic,
+    getExcludedOutpoints: () => new Set(),
+    broadcastRound: async () => { broadcasts += 1; return txid(10_002); },
+    getUtxos: async () => { throw new Error("Indexer offline"); },
+    isPaused: () => false,
+    onProgress: () => {},
+    delay: async () => {}, pollMs: 0, maxPolls: 3,
+  });
+  assert.equal(result.status, "paused");
+  assert.equal(broadcasts, 1);
+}
+
+await testTransientIndexerErrorRetriesReadWithoutRebroadcast();
+await testIndexerStaysUnavailableStopsWithoutRebroadcast();
+
 testAutoSessionEstimates();
 await testOneApprovalCompletesThousandUtxos();
 await testFeeBudgetStopsBeforeAnotherBroadcast();
