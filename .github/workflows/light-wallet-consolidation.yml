@@ -5,6 +5,9 @@ on:
     paths:
       - ".github/workflows/light-wallet-consolidation.yml"
       - "apps/web/src/pages/Send.tsx"
+      - "apps/web/src/pages/History.tsx"
+      - "apps/web/src/components/ApiStatusBar.tsx"
+      - "apps/web/tests/readOnlyApiScan.mjs"
       - "apps/web/src/lib/consolidationPolicy.ts"
       - "apps/web/src/lib/consolidationAuto.ts"
       - "apps/web/tests/consolidationAuto.test.ts"
@@ -42,3 +45,5 @@ jobs:
         run: npm --prefix apps/web run test:consolidation
       - name: Build web wallet
         run: npm --prefix apps/web run build
+      - name: Reject legacy wallet API routes in browser bundle
+        run: npm --prefix apps/web run scan:readonly-api
