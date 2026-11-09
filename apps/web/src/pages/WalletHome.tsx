@@ -32,11 +32,6 @@ function formatAddressError(error: string | null, t: any) {
   return t("wallet.errors.dataUnavailable", { defaultValue: "Unable to load wallet data. Please try again later." });
 }
 
-function formatWordCount(wordCount: number) {
-  if (!wordCount) return "0 words";
-  return `${wordCount} ${wordCount === 1 ? "word" : "words"}`;
-}
-
 export default function WalletHome() {
   const { t } = useTranslation();
   const [address, setAddress] = useState(localStorage.getItem("pepew_address") || "");
@@ -234,7 +229,7 @@ export default function WalletHome() {
             spellCheck={false}
           />
           <div className="muted" style={{ marginTop: 6, fontSize: "0.85rem" }}>
-            {t("wallet.security.wordCount", { defaultValue: "Mnemonic word count" })}: {formatWordCount(mnemonicWordCount)} · {t("home.mnemonicHint")}
+            {t("wallet.security.wordCountValue", { count: mnemonicWordCount })} · {t("home.mnemonicHint")}
           </div>
           {showMnemonicHint && (
             <div className="error" style={{ marginTop: 6 }}>
@@ -281,7 +276,7 @@ export default function WalletHome() {
                   <div className="muted" style={{ marginTop: 8, fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: 4 }}>
                     <div>{t("wallet.balance.apiStatus")}: <span style={{ color: "rgba(0, 200, 100, 1)", fontWeight: "bold" }}>{t("wallet.balance.healthy")}</span></div>
                     {lastUpdated && <div>{t("wallet.balance.updated")}: {lastUpdated}</div>}
-                    <div>Source: PEPEW Light API / ElectrumX Gateway</div>
+                    <div>{t("wallet.balance.sourceLabel")}: PEPEW Light API / ElectrumX Gateway</div>
                   </div>
                 </>
               ) : (

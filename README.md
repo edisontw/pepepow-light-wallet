@@ -118,6 +118,7 @@ VITE_PEPEW_LIGHT_API_BASE_URL=https://light.pepepow.net
 ```bash
 npm run build
 npm --prefix apps/web run test:client
+npm --prefix apps/web run test:i18n
 npm --prefix apps/web run test:consolidation
 # Includes automatic consolidation flow tests
 npm --prefix apps/web run test:amount
@@ -208,7 +209,7 @@ PEPEW Light API 無法協助找回錢包。
 
 The default UI language is English.
 
-The wallet supports language switching through the top-right language selector:
+The wallet supports language switching through the top-right language selector. `npm --prefix apps/web run test:i18n` checks that all three translation dictionaries contain matching keys:
 
 - English
 - 中文
