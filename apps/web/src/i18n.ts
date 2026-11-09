@@ -43,7 +43,8 @@ const resources = {
       header: {
         wallet: "錢包",
         primaryNav: "主要導覽",
-        toggleTheme: "切換主題"
+        toggleTheme: "切換主題",
+        theme: "主題"
       },
       nav: {
         home: "首頁",
@@ -52,7 +53,8 @@ const resources = {
         mini: "Mini",
         homeShort: "主",
         sendShort: "發",
-        historyShort: "紀"
+        historyShort: "紀",
+        backToLight: "返回 PEPEW Light"
       },
       lang: {
         en: "EN",
@@ -84,7 +86,7 @@ const resources = {
         localWallet: "本地錢包（助記詞只存前端）",
         createWallet: "產生助記詞並建立地址",
         useMnemonic: "使用助記詞導出地址",
-        mnemonicPlaceholder: "助記詞 (可手動貼上)",
+        mnemonicPlaceholder: "助記詞(可手動貼上)",
         amountLabel: "金額（PEPEW）",
         balanceFailed: "餘額查詢失敗",
         priceFailed: "價格查詢失敗",
@@ -160,6 +162,7 @@ const resources = {
         consolidateWaitingIndexer: "⏳ 等待網路確認中… 自動整理會自動繼續。",
         consolidateRetryFailed: "等待網路確認逾時。請稍後手動繼續。",
         consolidatePausedManual: "自動整理已暫停。請檢查狀態後手動繼續下一輪。",
+        consolidatePausedBackground: "應用程式進入背景，已暫停整理。返回頁面即可繼續。",
         consolidateAutoProceed: "即將進入下一輪（第 {{round}}/{{total}} 輪，剩餘約 {{remaining}} 筆）。",
         consolidateContinueHint: "本輪完成，尚有約 {{remaining}} 筆 UTXO。可繼續下一輪。",
         consolidateCompleted: "整理完成（目前約 {{remaining}} 筆 UTXO）。",
@@ -169,8 +172,12 @@ const resources = {
         consolidateWarningMultiRound: "UTXO 很多時會分成多輪交易，可能需要較久時間。",
         consolidateWarningNoRepeat: "請勿連續重複點擊。每一輪需完成後才能進入下一輪。",
         utxoWarningTitle: "UTXO 筆數偏高",
-        utxoWarningBody: "你目前有 {{count}} 筆 UTXOs，單筆交易可能過大，建議先 Consolidate UTXOs。",
-        utxoWarningAction: "前往 Utilities / Consolidate",
+        utxoWarningBody: "你目前有 {{count}} 筆 UTXOs，單筆交易可能過大，建議先整理 UTXO。",
+        utxoWarningAction: "前往工具／整理 UTXO",
+        savedConsolidationResume: "UTXO 整理已暫停，要繼續嗎？",
+        resumeConsolidation: "繼續整理 UTXO",
+        keepScreenAwake: "保持螢幕喚醒",
+        screenLockUnsupported: "裝置不支援防止螢幕鎖定，請保持螢幕開啟以繼續整理。",
         consolidatePhase: {
           idle: "閒置",
           building: "建立交易資料",
@@ -186,6 +193,8 @@ const resources = {
         },
         consolidateContinue: "繼續下一輪",
         refreshUtxos: "重新整理 UTXO",
+        refresh: "重新整理",
+        lastUpdated: "最後更新時間"
         loadingRounds: "載入下一輪...",
         utxosTitle: "UTXOs（偵測到 {{count}} 筆）",
         broadcasted: "已廣播",
@@ -366,16 +375,19 @@ const resources = {
           nonCustodial: "非託管錢包",
           mnemonicLocal: "助記詞與私鑰只會保存在你的瀏覽器中。",
           serverNeverReceives: "伺服器不會接收你的助記詞或私鑰。",
-          backupPhrase: "使用前請自行備份 recovery phrase。",
+          backupPhrase: "使用前請自行備份助記詞。",
           apiCannotRecover: "PEPEW Light API 無法協助找回錢包。",
-          neverShare: "請勿將 recovery phrase 提供給任何人。",
-          understandRisk: "我了解這是非託管錢包，並且我需要自行備份 recovery phrase。"
+          neverShare: "請勿將助記詞提供給任何人。",
+          understandRisk: "我了解這是非託管錢包，並且我需要自行備份助記詞。",
+          smallAmount: "錢包仍處於公開測試階段，請先使用小額資金測試。",
+          browserStorage: "助記詞僅在瀏覽器中處理。若使用共用裝置，請記得清除錢包；切勿將助記詞貼到伺服器表單或客服對話中。",
+          wordCountValue: "助記詞數量：{{count}} 個"
         },
         actions: {
           createWallet: "建立錢包",
           importWallet: "匯入錢包",
           forgetWallet: "清除錢包",
-          forgetWalletConfirm: "確定要從此瀏覽器清除錢包嗎？請確保您已備份 recovery phrase！",
+          forgetWalletConfirm: "確定要從此瀏覽器清除錢包嗎？請確保您已備份助記詞！",
           copyAddress: "複製地址",
           refresh: "重新整理"
         },
@@ -386,7 +398,8 @@ const resources = {
           loading: "正在讀取 PEPEW Light API 餘額...",
           empty: "無法取得 PEPEW Light API 餘額。",
           healthy: "連線正常",
-          unhealthy: "連線中斷"
+          unhealthy: "連線中斷",
+          sourceLabel: "資料來源"
         },
         history: {
           title: "交易紀錄",
@@ -494,7 +507,8 @@ const resources = {
       header: {
         wallet: "Wallet",
         primaryNav: "Primary",
-        toggleTheme: "Toggle theme"
+        toggleTheme: "Toggle theme",
+        theme: "Theme"
       },
       nav: {
         home: "Home",
@@ -503,7 +517,8 @@ const resources = {
         mini: "Mini",
         homeShort: "H",
         sendShort: "S",
-        historyShort: "Tx"
+        historyShort: "Tx",
+        backToLight: "Back to PEPEW Light"
       },
       lang: {
         en: "EN",
@@ -827,7 +842,10 @@ const resources = {
           backupPhrase: "Back up your recovery phrase before using the wallet.",
           apiCannotRecover: "PEPEW Light API cannot recover your wallet.",
           neverShare: "Never share your recovery phrase with anyone.",
-          understandRisk: "I understand that this is a non-custodial wallet and I am responsible for backing up my recovery phrase."
+          understandRisk: "I understand that this is a non-custodial wallet and I am responsible for backing up my recovery phrase.",
+          smallAmount: "Use small amounts first while the wallet is in public beta.",
+          browserStorage: "Mnemonic handling is browser-only. Clear this wallet on shared devices and never paste your recovery phrase into server forms or support chats.",
+          wordCountValue: "Mnemonic word count: {{count}}"
         },
         actions: {
           createWallet: "Create Wallet",
@@ -844,7 +862,8 @@ const resources = {
           loading: "Loading PEPEW Light API balance...",
           empty: "PEPEW Light API balance unavailable.",
           healthy: "Healthy",
-          unhealthy: "Unhealthy"
+          unhealthy: "Unhealthy",
+          sourceLabel: "Source"
         },
         history: {
           title: "History",
