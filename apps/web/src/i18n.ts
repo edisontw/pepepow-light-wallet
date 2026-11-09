@@ -86,7 +86,7 @@ const resources = {
         localWallet: "本地錢包（助記詞只存前端）",
         createWallet: "產生助記詞並建立地址",
         useMnemonic: "使用助記詞導出地址",
-        mnemonicPlaceholder: "助記詞(可手動貼上)",
+        mnemonicPlaceholder: "助記詞 (可手動貼上)",
         amountLabel: "金額（PEPEW）",
         balanceFailed: "餘額查詢失敗",
         priceFailed: "價格查詢失敗",
@@ -194,7 +194,7 @@ const resources = {
         consolidateContinue: "繼續下一輪",
         refreshUtxos: "重新整理 UTXO",
         refresh: "重新整理",
-        lastUpdated: "最後更新時間"
+        lastUpdated: "最後更新時間",
         loadingRounds: "載入下一輪...",
         utxosTitle: "UTXOs（偵測到 {{count}} 筆）",
         broadcasted: "已廣播",
