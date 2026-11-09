@@ -21,6 +21,7 @@ https://light.pepepow.net/wallet/
 - History page loads.
 - History rows show deterministic `Status` and `Height`.
 - API errors display as clean user-facing messages.
+- Footer API status checks only same-origin `GET /api/health`; no request is sent to the retired `/wallet/healthz` endpoint.
 
 ## Browser DevTools Network checks
 
@@ -156,7 +157,7 @@ grep -RIn "api.pepepow.net" apps/web/dist || true
 grep -RIn "/v1/\|/wallet/utxos\|/wallet/price\|/wallet/tx/broadcast\|/wallet/tx/raw" apps/web/dist || true
 ```
 
-Expected public wallet runtime should not call legacy wallet APIs.
+Expected public wallet runtime should not call legacy wallet APIs. The build scan also rejects the retired `/wallet/healthz` footer status endpoint; never suppress scan failures without tracing the importing component.
 
 ## Local secret scan
 
