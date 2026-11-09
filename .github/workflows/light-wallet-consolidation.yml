@@ -8,6 +8,9 @@ on:
       - "apps/web/src/lib/consolidationPolicy.ts"
       - "apps/web/src/lib/consolidationAuto.ts"
       - "apps/web/tests/consolidationAuto.test.ts"
+      - "apps/web/tests/i18nCoverage.test.mjs"
+      - "apps/web/src/components/layout/Header.tsx"
+      - "apps/web/src/pages/WalletHome.tsx"
       - "apps/web/src/locales/ru.ts"
       - "apps/web/tests/consolidationPolicy.test.ts"
       - "apps/web/package.json"
@@ -33,6 +36,8 @@ jobs:
         run: npm ci --prefix apps/web
       - name: Build wallet-core
         run: npm --prefix packages/wallet-core run build
+      - name: Translation coverage
+        run: npm --prefix apps/web run test:i18n
       - name: Consolidation policy tests
         run: npm --prefix apps/web run test:consolidation
       - name: Build web wallet
