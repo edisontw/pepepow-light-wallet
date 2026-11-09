@@ -117,7 +117,7 @@ export default function Header({ compact }: HeaderProps) {
             }}
             aria-label={t("header.toggleTheme")}
           >
-            Theme
+            {t("header.theme")}
           </button>
           <button className="btn secondary small" onClick={() => i18n.changeLanguage(nextLang)}>
             {langLabel}
