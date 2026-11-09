@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { EXPLORER_BASE_URL } from "../lib/api";
 import { pepewLightClient } from "../lib/pepewLightClient";
 import AppLayout from "../components/layout/AppLayout";
 import PageCard from "../components/layout/PageCard";
 
+// Keep the Explorer link independent of the retired Wallet API module.
+const EXPLORER_BASE_URL = "https://explorer.pepepow.net";
 const INITIAL_HISTORY_LIMIT = 10;
 const SHOW_MORE_STEP = 25;
 const HISTORY_FETCH_THROTTLE_MS = 15000;

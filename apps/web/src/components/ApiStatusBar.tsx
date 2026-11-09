@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { apiFetch, API_BASE, API_ENDPOINTS } from "../lib/api";
 
 type ApiStatus = "checking" | "ok" | "fail";
 
@@ -10,27 +9,23 @@ export default function ApiStatusBar() {
 
   useEffect(() => {
     let active = true;
-    const run = async () => {
-      try {
-        const r = await apiFetch(API_ENDPOINTS.wallet.healthz);
-        const j = await r.json().catch(() => ({}));
-        if (!active) return;
-        if (r.ok) {
-          setStatus("ok");
-          console.info("[api] base", API_BASE, "healthz", j);
-        } else {
-          setStatus("fail");
-          console.warn("[api] healthz failed", r.status, j);
-        }
-      } catch (err) {
-        if (active) setStatus("fail");
-        console.error("[api] healthz failed", err);
-      }
-    };
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
 
-    void run();
+    // Check the same-origin PEPEW Light gateway; never call the retired Wallet API.
+    void fetch("/api/health", { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (active) setStatus(response.ok ? "ok" : "fail");
+      })
+      .catch(() => {
+        if (active) setStatus("fail");
+      })
+      .finally(() => window.clearTimeout(timeout));
+
     return () => {
       active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
     };
   }, []);
 
@@ -40,7 +35,7 @@ export default function ApiStatusBar() {
   return (
     <div className="status-bar">
       <span>
-        {t("api.base")}: <code>{API_BASE}</code>
+        {t("api.base")}: <code>/api</code>
       </span>
       <span>
         {t("api.status")}: <strong>{statusLabel}</strong>

@@ -13,6 +13,7 @@ if (!fs.existsSync(distRoot)) {
 
 const forbidden = [
   "api.pepepow.net",
+  "/wallet/healthz",
   "/wallet/utxos",
   "/wallet/price",
   "/wallet/tx/broadcast",
