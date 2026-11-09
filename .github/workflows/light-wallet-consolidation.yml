@@ -19,6 +19,13 @@ on:
       - "apps/web/package.json"
       - "apps/web/src/i18n.ts"
       - "packages/wallet-core/**"
+  pull_request:
+    paths:
+      - ".github/workflows/light-wallet-consolidation.yml"
+      - "apps/web/src/**"
+      - "apps/web/tests/**"
+      - "apps/web/package.json"
+      - "packages/wallet-core/**"
   workflow_dispatch:
 
 permissions:
