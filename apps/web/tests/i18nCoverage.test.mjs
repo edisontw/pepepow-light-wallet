@@ -10,6 +10,7 @@ const header = read("../src/components/layout/Header.tsx");
 
 function initializer(source, name) {
   const file = ts.createSourceFile(name + ".ts", source, ts.ScriptTarget.Latest, true);
+  assert.equal(file.parseDiagnostics.length, 0, name + ": invalid dictionary TypeScript syntax");
   for (const statement of file.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
